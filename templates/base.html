@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+{% load i18n %}
+<html lang="{{ current_lang }}" dir="{% if lang_meta.dir == 2 %}rtl{% else %}ltr{% endif %}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Hotel Management{% endblock %}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f8fafc;
+            --card-bg: rgba(255, 255, 255, 0.9);
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --accent-1: #3b82f6;
+        }
+        body.dark-mode {
+            --bg-color: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.8);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+        body { 
+            margin: 0; padding: 0; font-family: 'Vazirmatn', sans-serif; 
+            background: var(--bg-color); color: var(--text-main); 
+            min-height: 100vh; transition: background 0.3s ease; 
+            padding-top: 80px;
+        }
+
+        .global-header {
+            position: fixed; top: 0; left: 0; width: 100%; height: 70px;
+            background: var(--card-bg); backdrop-filter: blur(15px);
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0 2rem; box-sizing: border-box; z-index: 9000;
+            border-bottom: 1px solid rgba(128,128,128,0.1);
+        }
+
+        .user-menu { display: flex; align-items: center; gap: 1rem; }
+        .global-avatar { width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(45deg, #3b82f6, #10b981); }
+        .user-info { font-size: 0.85rem; }
+        .user-info .name { font-weight: bold; }
+        .user-info .role { color: var(--text-muted); font-size: 0.75rem; }
+
+        .page-title-center { position: absolute; left: 50%; transform: translateX(-50%); text-align: center; }
+        .actions-group { display: flex; gap: 0.8rem; align-items: center; }
+
+        .s-btn {
+            background: var(--card-bg); border: 1px solid rgba(128,128,128,0.2);
+            border-radius: 50%; width: 40px; height: 40px; display: flex;
+            align-items: center; justify-content: center; cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); font-size: 1.1rem;
+        }
+
+        .lang-dropdown { position: relative; display: inline-block; }
+        .lang-content {
+            display: none; position: absolute; background: var(--card-bg);
+            min-width: 120px; box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            border-radius: 8px; padding: 5px 0; z-index: 100; top: 100%;
+        }
+        .lang-dropdown:hover .lang-content { display: block; }
+        /* Add a small invisible bridge to prevent closing on gap */
+        .lang-dropdown::after { content: ""; position: absolute; top: 100%; left: 0; width: 100%; height: 10px; }
+        .lang-content form button {
+            width: 100%; padding: 10px 16px; border: none; background: none;
+            color: var(--text-main); text-align: inherit; cursor: pointer; font-family: inherit;
+        }
+        .lang-content form button:hover { background: var(--accent-1); color: white; }
+
+        .floating-legend {
+            position: fixed; bottom: 2rem; z-index: 10000;
+            background: var(--card-bg); padding: 0.8rem; border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2); display: flex;
+            flex-direction: column; gap: 0.8rem; font-size: 0.75rem;
+            border: 1px solid rgba(128,128,128,0.1);
+        }
+        [dir="rtl"] .floating-legend { left: 1rem; } [dir="ltr"] .floating-legend { right: 1rem; }
+        .f-item { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+        .f-color { width: 15px; height: 15px; border-radius: 3px; }
+
+        {% block extra_css %}{% endblock %}
+    </script>
+    <style>
+        .dark-mode-active body { --bg-color: #0f172a; --card-bg: rgba(30, 41, 59, 0.8); --text-main: #f8fafc; --text-muted: #94a3b8; }
+        body.dark-mode { --bg-color: #0f172a; --card-bg: rgba(30, 41, 59, 0.8); --text-main: #f8fafc; --text-muted: #94a3b8; }
+    </style>
+</head>
+<body class="{% if request.session.theme == 'dark' %}dark-mode{% endif %}">
+    
+    <header class="global-header">
+        <div class="user-menu">
+            <div class="global-avatar"></div>
+            <div class="user-info">
+                <div class="name">{{ user.username }}</div>
+                <div class="role">{{ user.role.name|default:"Administrator" }}</div>
+            </div>
+        </div>
+
+        <div class="page-title-center">
+            <h1 style="margin:0; font-size: 1.3rem; font-weight: bold; background: linear-gradient(to right, #3b82f6, #10b981); -webkit-background-clip: text; -webkit-text-fill-color: transparent; white-space: nowrap;">
+                {% block page_title %}{% endblock %}
+            </h1>
+        </div>
+
+        <div class="actions-group">
+            <div class="lang-dropdown">
+                <button class="s-btn">🌐</button>
+                <div class="lang-content">
+                    <form action="{% url 'set_language' %}" method="post">
+                        {% csrf_token %}
+                        <input name="next" type="hidden" value="{{ request.get_full_path }}">
+                        <button type="submit" name="language" value="fa">فارسی</button>
+                        <button type="submit" name="language" value="en">English</button>
+                        <button type="submit" name="language" value="tr">Türkçe</button>
+                    </form>
+                </div>
+            </div>
+            <button id="global-theme-toggle" class="s-btn" onclick="toggleGlobalTheme()">
+                {% if request.session.theme == 'dark' %}🌙{% else %}☀️{% endif %}
+            </button>
+            {% if user.is_superuser %}
+                <button class="s-btn" onclick="toggleGlobalEditMode()">✏️</button>
+            {% endif %}
+        </div>
+    </header>
+
+    <div class="floating-legend" id="global-legend">
+        <!-- Default (Large View) Legend Items -->
+        <div class="legend-large-view">
+            <div class="f-item"><div class="f-color" style="background:#94a3b8"></div> <span>{{ t.clean }}</span></div>
+            <div class="f-item"><div class="f-color" style="background:#78350f"></div> <span>{{ t.dirty }}</span></div>
+            <div class="f-item"><div class="f-color" style="background:#10b981"></div> <span>{{ t.paid|default:"Paid" }}</span></div>
+            <div class="f-item"><div class="f-color" style="background:#ef4444"></div> <span>{{ t.debt|default:"Debt" }}</span></div>
+        </div>
+        <!-- Small View Legend Items (Hidden by default) -->
+        <div class="legend-small-view" style="display:none;">
+            <div class="f-item"><div class="f-color" style="background:#10b981"></div> <span>{% if LANGUAGE_CODE == 'fa' %}خریداری{% else %}Sold{% endif %}</span></div>
+            <div class="f-item"><div class="f-color" style="background:#f59e0b"></div> <span>{% if LANGUAGE_CODE == 'fa' %}رزرو{% else %}Res{% endif %}</span></div>
+            <div class="f-item"><div class="f-color" style="background:#94a3b8"></div> <span>{% if LANGUAGE_CODE == 'fa' %}خالی{% else %}Vacant{% endif %}</span></div>
+        </div>
+    </div>
+
+    {% block content %}{% endblock %}
+
+    <script>
+        if (localStorage.getItem('hotel_theme') === 'dark') {
+            document.body.classList.add('dark-mode');
+        }
+
+        function toggleGlobalTheme() {
+            const body = document.body;
+            const btn = document.getElementById('global-theme-toggle');
+            body.classList.toggle('dark-mode');
+            const isDark = body.classList.contains('dark-mode');
+            btn.innerText = isDark ? '🌙' : '☀️';
+            localStorage.setItem('hotel_theme', isDark ? 'dark' : 'light');
+            fetch('/api/core/set-theme/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+                body: JSON.stringify({ theme: isDark ? 'dark' : 'light' })
+            });
+        }
+
+        function toggleGlobalEditMode() {
+            document.body.classList.toggle('edit-mode');
+            const adminBar = document.getElementById('admin-bar');
+            if (adminBar) adminBar.style.display = document.body.classList.contains('edit-mode') ? 'flex' : 'none';
+        }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block extra_css %}
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; position: relative; }
+        .main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+        .user-profile { display: flex; align-items: center; gap: 1rem; }
+        .avatar { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(45deg, var(--accent-1), var(--accent-2)); }
+
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+        .card { background: var(--card-bg); backdrop-filter: blur(10px); border-radius: 20px; padding: 1.5rem; border: 1px solid rgba(128, 128, 128, 0.1); transition: 0.3s; position: relative; overflow: hidden; cursor: pointer; text-decoration: none; color: inherit; display: block; }
+        .card:hover { transform: translateY(-5px); box-shadow: 0 20px 40px rgba(0,0,0,0.1); border-color: var(--accent-1); }
+        .card h3 { color: var(--text-muted); font-size: 0.9rem; margin: 0 0 0.5rem 0; }
+        .card .value { font-size: 2rem; font-weight: 700; }
+        .card .trend { font-size: 0.8rem; color: var(--accent-2); display: flex; align-items: center; gap: 4px; margin-top: 0.5rem; }
+
+        .room-status-list { display: flex; flex-direction: column; gap: 0.8rem; margin-top: 1rem; }
+        .room-status-list div { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; }
+        .display-val { font-weight: bold; }
+        .edit-input { display: none; width: 50px; background: rgba(128,128,128,0.1); border: 1px solid var(--accent-1); color: var(--text-main); border-radius: 4px; padding: 2px 5px; }
+        body.edit-mode .edit-input { display: inline-block; }
+        body.edit-mode .display-val { display: none; }
+{% endblock %}
+
+{% block content %}
+    <div class="container">
+        <header class="main-header" style="margin-top: 2rem;">
+            <div>
+                <h1 style="margin:0; font-size: 2.2rem; background: linear-gradient(to right, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{% if LANGUAGE_CODE == 'fa' %}داشبورد مدیریت{% else %}Management Dashboard{% endif %}</h1>
+                <p style="color: var(--text-muted); margin: 5px 0 0 0;">{{ hotel.name|default:"Grand Hotel" }} - {% now "DATE_FORMAT" %}</p>
+            </div>
+        </header>
+
+        <form id="dashboard-form" method="post">
+            {% csrf_token %}
+            <div class="stat-grid">
+                <!-- Overview Card (Clickable) -->
+                <a href="{% if not body_edit_mode %}{% url 'room_overview' %}{% else %}#{% endif %}" class="card" id="overview-card">
+                    <h3>{% if LANGUAGE_CODE == 'fa' %}نمای کلی هتل{% else %}Hotel Overview{% endif %}</h3>
+                    <div class="value">{{ total_rooms }}</div>
+                    <div class="room-status-list">
+                        {% if room_stats_list %}
+                            {% for stat in room_stats_list %}
+                                <div>{{ stat.name }}: <span class="display-val">{{ stat.total }}</span> <input type="number" name="room_count_{{ stat.id }}" value="{{ stat.total }}" class="edit-input"></div>
+                            {% endfor %}
+                        {% else %}
+                            <div style="font-size: 0.8rem; color: var(--text-muted);">{% if LANGUAGE_CODE == 'fa' %}هیچ نوع اتاقی موجود نیست{% else %}No room types available{% endif %}</div>
+                        {% endif %}
+                    </div>
+                </a>
+
+                <div class="card">
+                    <h3>{% if LANGUAGE_CODE == 'fa' %}وضعیت نظافت{% else %}Housekeeping{% endif %}</h3>
+                    <div class="value">{{ total_rooms }}</div>
+                    <div class="room-status-list">
+                        <div style="color: var(--accent-2);">{% if LANGUAGE_CODE == 'fa' %}تمیز:{% else %}Clean:{% endif %} <span class="display-val">{{ room_clean_stats.clean }}</span></div>
+                        <div style="color: #f87171;">{% if LANGUAGE_CODE == 'fa' %}کثیف:{% else %}Dirty:{% endif %} <span class="display-val">{{ room_clean_stats.dirty }}</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>{% if LANGUAGE_CODE == 'fa' %}رزروها و مهمانان{% else %}Reservations{% endif %}</h3>
+                    <div class="value">{{ total_guests }}</div>
+                    <div class="trend">↑ 12% {% if LANGUAGE_CODE == 'fa' %}نسبت به دیروز{% else %}vs yesterday{% endif %}</div>
+                    <div class="room-status-list">
+                        <div>{% if LANGUAGE_CODE == 'fa' %}رزروهای امروز:{% else %}Today's Reservations:{% endif %} <span class="display-val">{{ total_reservations }}</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>{% if LANGUAGE_CODE == 'fa' %}موجودی انبار{% else %}Inventory Stock{% endif %}</h3>
+                    <div class="value">{{ total_inventory }}</div>
+                    <div class="room-status-list">
+                        {% for item in low_stock %}
+                            <div style="color: #fb923c; font-size: 0.8rem;">⚠️ {{ item.name }} ({{ item.quantity }})</div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+{% endblock %}
+
+{% block extra_js %}
+    <script>
+        function toggleEditMode() {
+            document.body.classList.toggle('edit-mode');
+            const overviewCard = document.getElementById('overview-card');
+            if (document.body.classList.contains('edit-mode')) {
+                overviewCard.style.pointerEvents = 'none';
+                overviewCard.style.opacity = '0.8';
+            } else {
+                overviewCard.style.pointerEvents = 'auto';
+                overviewCard.style.opacity = '1';
+            }
+        }
+    </script>
+{% endblock %}

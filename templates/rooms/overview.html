@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% if LANGUAGE_CODE == 'fa' %}نمای کلی هتل{% else %}Hotel Overview{% endif %}{% endblock %}
+
+{% block extra_css %}
+    .container { max-width: 95%; margin: 0 auto; padding: 1.5rem; position: relative; }
+    
+    /* Top Unified Control Bar */
+    .overview-controls-bar { 
+        display: flex; justify-content: space-between; align-items: center; 
+        margin-bottom: 2rem; padding: 0 1rem; flex-wrap: nowrap; gap: 1rem;
+    }
+    .control-item { display: flex; align-items: center; gap: 0.5rem; }
+    .control-label { font-size: 0.8rem; font-weight: bold; color: var(--text-muted); white-space: nowrap; }
+
+    .btn-group { display: flex; background: var(--card-bg); border-radius: 10px; overflow: hidden; border: 1px solid rgba(128,128,128,0.2); }
+    .view-btn { padding: 0.5rem 1rem; border: none; background: none; cursor: pointer; color: var(--text-main); font-size: 0.8rem; transition: 0.2s; }
+    .view-btn.active { background: var(--accent-1); color: white; }
+
+    /* Date Navigator Integrated */
+    .date-nav-simple { display: flex; align-items: center; justify-content: center; gap: 0.8rem; background: var(--card-bg); padding: 0.4rem 1rem; border-radius: 50px; border: 1px solid rgba(128,128,128,0.1); }
+    .date-nav-simple span { font-weight: bold; font-size: 0.9rem; min-width: 100px; text-align: center; }
+    .date-nav-btn { background: none; border: 1px solid rgba(128,128,128,0.2); border-radius: 50%; width: 28px; height: 28px; cursor: pointer; color: var(--text-main); display: flex; align-items: center; justify-content: center; }
+
+    /* Matrix Scroll System */
+    .matrix-wrapper { position: relative; background: var(--card-bg); border-radius: 16px; border: 1px solid rgba(128,128,128,0.1); overflow: hidden; margin-bottom: 2rem; }
+    .scroll-area { overflow-x: auto; width: 100%; }
+    .matrix-table { border-collapse: collapse; min-width: 100%; table-layout: fixed; }
+    .matrix-table th, .matrix-table td { border: 1px solid rgba(128,128,128,0.05); text-align: center; }
+    .row-label { position: sticky; left: 0; background: var(--card-bg); z-index: 100; width: 150px; padding: 1rem; font-weight: bold; font-size: 0.85rem; border-right: 1px solid rgba(128,128,128,0.1); }
+    .date-header { width: 100px; padding: 12px 0; }
+    .v-stack { display: flex; flex-direction: column; align-items: center; }
+    .v-text { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 0.7rem; margin-bottom: 4px; }
+    .v-day { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 0.8rem; font-weight: bold; }
+    .matrix-cell { height: 75px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; }
+    .m-sold { background: #10b981; } .m-reserved { background: #f59e0b; } .m-vacant { background: #94a3b8; }
+
+    /* Navigation Arrows */
+    .nav-arrow { 
+        position: fixed; top: 50%; transform: translateY(-50%); z-index: 10000;
+        background: var(--accent-1); color: white; border: none; border-radius: 50%;
+        width: 42px; height: 42px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3); font-size: 1.5rem; transition: 0.3s;
+    }
+    [dir="rtl"] .nav-arrow.prev { right: 15px; } [dir="rtl"] .nav-arrow.next { left: 15px; }
+    [dir="ltr"] .nav-arrow.prev { left: 15px; } [dir="ltr"] .nav-arrow.next { right: 15px; }
+
+    /* Large View - Compact Layout */
+    .group-section { display: flex; gap: 1rem; margin-bottom: 0.8rem; align-items: stretch; }
+    .vertical-header { 
+        writing-mode: vertical-rl; transform: rotate(180deg); 
+        background: var(--accent-1); color: white; padding: 0.8rem 0.4rem; 
+        border-radius: 6px; font-weight: bold; font-size: 0.8rem; text-align: center;
+        display: flex; align-items: center; justify-content: center; min-width: 35px;
+    }
+    .room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; flex: 1; }
+    .room-card { border-radius: 12px; padding: 1.2rem; cursor: pointer; transition: 0.3s; border: 1px solid rgba(128,128,128,0.2); }
+    .room-card.clean { background: #94a3b8; color: white; }
+    .room-card.dirty { background: #d2691e; color: white; }
+    .room-card.paid { background: #10b981; color: white; }
+    .room-card.occ-unpaid { background: #ef4444; color: white; }
+    .room-card.res-unpaid { background: #f59e0b; color: white; }
+    .room-card.res-dirty { background: linear-gradient(45deg, #d2691e, #f59e0b); color: white; animation: blink 1s infinite; }
+    @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0.5; } }
+
+    /* Context Menu Styles */
+    .context-menu { position: fixed; background: var(--card-bg); border: 1px solid rgba(128,128,128,0.2); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); display: none; z-index: 100000; padding: 5px 0; min-width: 180px; }
+    .menu-item { padding: 10px 20px; cursor: pointer; color: var(--text-main); font-size: 0.85rem; transition: 0.2s; }
+    .menu-item:hover { background: var(--accent-1); color: white; }
+
+    .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 20000; }
+    .modal-content { background: var(--card-bg); padding: 2rem; border-radius: 16px; width: 400px; position: relative; color: var(--text-main); }
+{% endblock %}
+
+{% block content %}
+    <div class="container">
+        {% if dirty_reserved_rooms %}
+        <div id="warning-icon" style="position: absolute; top: 10px; right: 10px; color: red; font-size: 24px; cursor: pointer; animation: blink 1s infinite;" onclick="showWarnings()">⚠️</div>
+        {% endif %}
+        <!-- Unified Single Row Control Bar -->
+        <div class="overview-controls-bar">
+            <div class="control-item">
+                <span class="control-label">{{ t.view_type }}:</span>
+                <div class="btn-group">
+                    <button class="view-btn {% if view_type == 'large' %}active{% endif %}" onclick="setView('large')">{{ t.large }}</button>
+                    <button class="view-btn {% if view_type == 'small' %}active{% endif %}" onclick="setView('small')">{{ t.small }}</button>
+                </div>
+            </div>
+
+            {% if view_type == 'large' %}
+            <div class="date-nav-simple">
+                <button class="date-nav-btn" onclick="navigateDay(-1)">‹</button>
+                <span>{{ current_date }}</span>
+                <button class="date-nav-btn" onclick="navigateDay(1)">›</button>
+            </div>
+            {% else %}
+            <div style="flex:1"></div>
+            {% endif %}
+
+            <div class="control-item">
+                <span class="control-label">{{ t.classification }}:</span>
+                <div class="btn-group">
+                    {% if view_type == 'large' %}
+                        <button class="view-btn {% if group_by == 'type' %}active{% endif %}" onclick="setGroup('type')">{{ t.type }}</button>
+                        <button class="view-btn {% if group_by == 'floor' %}active{% endif %}" onclick="setGroup('floor')">{{ t.floor }}</button>
+                    {% else %}
+                        <button class="view-btn {% if range_type == 'weekly' %}active{% endif %}" onclick="setRange('weekly')">{{ t.weekly }}</button>
+                        <button class="view-btn {% if range_type == 'monthly' %}active{% endif %}" onclick="setRange('monthly')">{{ t.monthly }}</button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        {% if user.is_superuser %}
+        <div id="admin-bar" style="background: var(--card-bg); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; display: none; gap: 1rem; align-items: center; border: 1px solid var(--accent-1);">
+            <div style="flex: 1; display:flex; gap:0.5rem;">
+                <button class="view-btn active" style="padding:8px 20px; border-radius:8px;" onclick="openModal('modal-type')">+ {{ t.type }}</button>
+                <button class="view-btn active" style="padding:8px 20px; border-radius:8px;" onclick="openModal('modal-room')">+ {{ t.room }}</button>
+            </div>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                {% for rt in room_types %}
+                    <div style="background: rgba(128,128,128,0.1); padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; display: flex; align-items: center; gap: 8px;">
+                        {{ rt.name }}
+                        <form onsubmit="hs(event, 'del-type-{{rt.id}}')" id="del-type-{{rt.id}}" style="margin:0;">
+                            {% csrf_token %}<input type="hidden" name="action" value="delete_room_type"><input type="hidden" name="type_id" value="{{ rt.id }}">
+                            <button type="submit" style="background:none; border:none; color:#ef4444; cursor:pointer; font-weight:bold;">×</button>
+                        </form>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if view_type == 'small' %}
+            <button class="nav-arrow prev" onclick="navigateTime(-1)">{% if LANGUAGE_CODE == 'fa' %}«{% else %}»{% endif %}</button>
+            <button class="nav-arrow next" onclick="navigateTime(1)">{% if LANGUAGE_CODE == 'fa' %}»{% else %}«{% endif %}</button>
+        {% endif %}
+
+        {% if view_type == 'small' %}
+        <div class="matrix-wrapper">
+            <div class="scroll-area">
+                <table class="matrix-table">
+                    <thead>
+                        <tr>
+                            <th class="row-label">{{ t.room_type }}</th>
+                            {% for date in date_range %}
+                                <th class="date-header"><div class="v-stack"><div class="v-text">{{ date|date:"d/m/Y" }}</div><div class="v-day">{{ date|date:"l" }}</div></div></th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in matrix_data %}
+                            <tr class="matrix-row">
+                                <td class="row-label">{{ row.type.name }}</td>
+                                {% for d_stat in row.dates %}
+                                    <td><div class="matrix-cell m-{{ d_stat.status }}"><div class="cell-val">{{ d_stat.numerator }}/{{ d_stat.denominator }}</div></div></td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}
+            <div class="large-view-content">
+                {% if group_by == 'type' %}
+                    {% regroup rooms by room_type as grouped_rooms %}
+                {% else %}
+                    {% regroup rooms by floor as grouped_rooms %}
+                {% endif %}
+
+                {% for group in grouped_rooms %}
+                    <div class="group-section">
+                        <div class="vertical-header">
+                            {% if group_by == 'floor' %}{{ t.floor }} {{ group.grouper }}{% else %}{{ group.grouper.name }}{% endif %}
+                        </div>
+                        <div class="room-grid">
+                            {% for room in group.list %}
+                                {% with res=room.active_res|first %}
+                                <div class="room-card {% if not res %}{% if room.status == 'DIRTY' %}dirty{% else %}clean{% endif %}{% elif res.is_paid %}paid{% elif res.is_occupied %}occ-unpaid{% elif room.status == 'DIRTY' %}res-dirty{% else %}res-unpaid{% endif %}" 
+                                     onclick="handleCardClick(this, '{{room.id}}', '{{room.number}}', '{{room.room_type.id}}', '{{room.floor}}')"
+                                     oncontextmenu="showContextMenu(event, '{{room.id}}', '{{room.number}}', '{% if res %}{{ res.is_occupied|yesno:'OUT,IN' }}{% else %}NONE{% endif %}')">
+                                    <div style="font-size:1.4rem; font-weight:bold;">#{{ room.number }} - {{ room.room_type.name }}</div>
+                                    <div class="guest-info">
+                                        {% if not res %}
+                                            <div style="text-align:center; padding:10px 0; font-weight:bold;">{{ t.vacant }}</div>
+                                        {% else %}
+                                            <div style="font-weight:bold; font-size:0.85rem;">{{ res.guest.first_name }} {{ res.guest.last_name }}</div>
+                                            <div style="font-size:0.7rem; opacity:0.8;">{{ res.guest.phone|default:'-' }}</div>
+                                            {% if res.is_occupied %}
+                                                <div style="font-size:0.7rem; opacity:0.8;">
+                                                    {{ t.check_out }}: 
+                                                    {% if res.actual_check_out %}
+                                                        {{ res.actual_check_out|date:'Y-m-d' }}
+                                                    {% else %}
+                                                        -
+                                                    {% endif %}
+                                                </div>
+                                            {% else %}
+                                                <div style="font-size:0.7rem; opacity:0.8;">
+                                                    {{ t.check_in }}: 
+                                                    {% if res.actual_check_in %}
+                                                        {{ res.actual_check_in|time:'H:i' }}
+                                                    {% else %}
+                                                        -
+                                                    {% endif %}
+                                                </div>
+                                            {% endif %}
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% endwith %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <!-- Color Legend -->
+        <div style="margin-top: 2rem; background: var(--card-bg); border-radius: 12px; padding: 1rem; border: 1px solid rgba(128,128,128,0.1);">
+            <h4 style="margin: 0 0 1rem 0; font-size: 1rem; color: var(--accent-1);">{{ t.color_legend|default:"راهنمای رنگ‌ها" }}</h4>
+            <div style="display: flex; flex-wrap: wrap; gap: 1rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div style="width: 20px; height: 20px; background: #94a3b8; border-radius: 4px;"></div>
+                    <span>{{ t.clean_vacant|default:"اتاق خالی تمیز" }}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div style="width: 20px; height: 20px; background: #d2691e; border-radius: 4px;"></div>
+                    <span>{{ t.dirty_vacant|default:"اتاق خالی کثیف" }}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div style="width: 20px; height: 20px; background: #f59e0b; border-radius: 4px;"></div>
+                    <span>{{ t.reserved|default:"اتاق رزرو شده" }}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div style="width: 20px; height: 20px; background: linear-gradient(45deg, #d2691e, #f59e0b); border-radius: 4px;"></div>
+                    <span>{{ t.reserved_dirty|default:"اتاق رزرو شده کثیف" }}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div style="width: 20px; height: 20px; background: #10b981; border-radius: 4px;"></div>
+                    <span>{{ t.occupied_paid|default:"اتاق پر خریداری شده" }}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div style="width: 20px; height: 20px; background: #ef4444; border-radius: 4px;"></div>
+                    <span>{{ t.occupied_unpaid|default:"اتاق پر با بدهی" }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="modal-details" class="modal"><div class="modal-content"><button style="float:right" onclick="closeModal()">×</button><h3 id="dt-title">{{ t.details }}</h3><div id="dt-body"></div></div></div>
+    <div id="modal-edit-room" class="modal"><div class="modal-content"><button style="float:right" onclick="closeModal()">×</button><h3>{{ t.edit_room }}</h3><form id="fe" onsubmit="hs(event,'fe')">{% csrf_token %}<input type="hidden" name="action" value="edit_room"><input type="hidden" name="room_id" id="eri">
+        <label>{{ t.room_number }}:</label><input type="text" name="number" id="ern" style="width:100%; margin-bottom:1rem;">
+        <label>{{ t.room_type }}:</label><select name="type_id" id="ert" style="width:100%; margin-bottom:1rem;">{% for rt in room_types %}<option value="{{ rt.id }}">{{ rt.name }}</option>{% endfor %}</select>
+        <label>{{ t.floor }}:</label><input type="number" name="floor" id="erf" style="width:100%; margin-bottom:1rem;">
+        <button type="submit" class="view-btn active" style="width:100%">{{ t.save }}</button></form></div></div>
+    <div id="modal-type" class="modal"><div class="modal-content"><button style="float:right" onclick="closeModal()">×</button><h3>New Type</h3><form id="ft" onsubmit="hs(event,'ft')">{% csrf_token %}<input type="hidden" name="action" value="add_room_type"><input type="text" name="name_en" placeholder="EN" style="width:100%; margin-bottom:0.5rem;"><input type="text" name="name_fa" placeholder="FA" style="width:100%; margin-bottom:1rem;"><button type="submit" class="view-btn active" style="width:100%">Add</button></form></div></div>
+    <div id="modal-room" class="modal"><div class="modal-content"><button style="float:right" onclick="closeModal()">×</button><h3>New Room</h3><form id="fr" onsubmit="hs(event,'fr')">{% csrf_token %}<input type="hidden" name="action" value="add_rooms"><select name="type_id" style="width:100%; margin-bottom:1rem;">{% for rt in room_types %}<option value="{{ rt.id }}">{{ rt.name }}</option>{% endfor %}</select><button type="submit" class="view-btn active" style="width:100%">Add</button></form></div></div>
+
+    <!-- Context Menu HTML -->
+    <div id="room-context-menu" class="context-menu">
+        <div class="menu-item" onclick="handleContextAction('reserve')">1- {{ t.reservation }}</div>
+        <div class="menu-item" id="menu-check-btn" onclick="handleContextAction('check')">2- {{ t.check_in }}</div>
+        <div class="menu-item" onclick="handleContextAction('clean')">3- {{ t.clean_room }}</div>
+    </div>
+
+    <script>
+        let currentContextMenuRoom = null;
+        function showContextMenu(e, id, num, resStatus) {
+            e.preventDefault();
+            currentContextMenuRoom = id;
+            const menu = document.getElementById('room-context-menu');
+            const btn = document.getElementById('menu-check-btn');
+            
+            if (resStatus === 'IN') btn.innerText = '2- ' + '{{ t.check_in }}';
+            else if (resStatus === 'OUT') btn.innerText = '2- ' + '{{ t.check_out }}';
+            else btn.innerText = '2- ' + '{{ t.no_reservation }}';
+            
+            menu.style.display = 'block';
+            menu.style.left = e.pageX + 'px';
+            menu.style.top = e.pageY + 'px';
+        }
+        document.addEventListener('click', () => { document.getElementById('room-context-menu').style.display = 'none'; });
+
+        async function handleContextAction(action) {
+            if (action === 'reserve') {
+                window.location.href = `/rooms/room/${currentContextMenuRoom}/`;
+            } else if (action === 'check') {
+                const res = await fetch('/rooms/api/context-action/', { 
+                    method: 'POST', 
+                    body: new FormData(Object.assign(document.createElement('form'), {
+                        innerHTML: `<input name="action" value="check_in_out"><input name="room_id" value="${currentContextMenuRoom}">`
+                    })), 
+                    headers: { 'X-CSRFToken': '{{ csrf_token }}' } 
+                });
+                if ((await res.json()).success) location.reload();
+            } else if (action === 'clean') {
+                const res = await fetch('/rooms/api/context-action/', { 
+                    method: 'POST', 
+                    body: new FormData(Object.assign(document.createElement('form'), {
+                        innerHTML: `<input name="action" value="toggle_clean"><input name="room_id" value="${currentContextMenuRoom}">`
+                    })), 
+                    headers: { 'X-CSRFToken': '{{ csrf_token }}' } 
+                });
+                if ((await res.json()).success) location.reload();
+            }
+        }
+        window.lang = '{{ LANGUAGE_CODE }}';
+        document.body.classList.remove('edit-mode');
+        function setView(v) { const url = new URL(window.location); url.searchParams.set('view', v); window.location.href = url.href; }
+        function setGroup(g) { const url = new URL(window.location); url.searchParams.set('group', g); window.location.href = url.href; }
+        function setRange(r) { const url = new URL(window.location); url.searchParams.set('range', r); window.location.href = url.href; }
+        function navigateDay(dir) { const date = new Date('{{ current_date }}'); date.setDate(date.getDate() + dir); const url = new URL(window.location); url.searchParams.set('date', date.toISOString().split('T')[0]); window.location.href = url.href; }
+        function navigateTime(dir) { const range = '{{ range_type }}'; const delta = range === 'weekly' ? 7 : 30; navigateDay(dir * delta); }
+        function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+        function closeModal() { document.querySelectorAll('.modal').forEach(m => m.style.display = 'none'); }
+        async function hs(e, fid) { e.preventDefault(); await fetch(window.location.href, { method: 'POST', body: new FormData(document.getElementById(fid)), headers: { 'X-Requested-With': 'XMLHttpRequest' } }); location.reload(); }
+        function handleCardClick(el, id, num, typeId, floor) { if (document.body.classList.contains('edit-mode')) { document.getElementById('eri').value = id; document.getElementById('ern').value = num; if(document.getElementById('ert')) document.getElementById('ert').value = typeId; if(document.getElementById('erf')) document.getElementById('erf').value = floor; openModal('modal-edit-room'); } else { window.location.href = `/rooms/room/${id}/`; } }
+
+        function showWarnings() {
+            const rooms = {{ dirty_reserved_rooms|length }};
+            if (rooms > 0) {
+                alert('{{ dirty_reserved_rooms|length }} اتاق رزرو شده کثیف وجود دارد. لطفاً نظافت کنید.');
+            }
+        }
+
+        // Notification every 5 minutes
+        setInterval(() => {
+            const rooms = {{ dirty_reserved_rooms|length }};
+            if (rooms > 0) {
+                if (Notification.permission === 'granted') {
+                    new Notification('هشدار: اتاق‌های کثیف رزرو شده', { body: `${rooms} اتاق نیاز به نظافت دارد.` });
+                } else if (Notification.permission !== 'denied') {
+                    Notification.requestPermission().then(permission => {
+                        if (permission === 'granted') {
+                            new Notification('هشدار: اتاق‌های کثیف رزرو شده', { body: `${rooms} اتاق نیاز به نظافت دارد.` });
+                        }
+                    });
+                }
+            }
+        }, 5 * 60 * 1000); // 5 minutes
+    </script>
+{% endblock %}

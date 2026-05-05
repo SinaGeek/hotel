@@ -1,0 +1,360 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block page_title %}{{ t.room }} #{{ room.number }}{% endblock %}
+
+{% block extra_css %}
+    .detail-container { max-width: 95%; margin: 1rem auto; padding: 1.5rem; background: var(--card-bg); border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+    .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+    .box { background: rgba(128,128,128,0.05); padding: 1rem; border-radius: 12px; border: 1px solid rgba(128,128,128,0.1); }
+    .box h3 { margin-top: 0; border-bottom: 1px solid var(--accent-1); padding-bottom: 6px; font-size: 1rem; color: var(--accent-1); display: flex; justify-content: space-between; margin-bottom: 0.8rem; }
+    
+    .field-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.4rem; }
+    .field-group { display: flex; align-items: center; gap: 4px; }
+    .field-group label { width: 100px; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0; flex-shrink: 0; }
+    .field-group input, .field-group select { flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(128,128,128,0.2); background: var(--bg-color); color: var(--text-main); font-size: 0.85rem; height: 36px; box-sizing: border-box; min-width: 0; }
+    
+    .btn-action { height: 36px; padding: 0 15px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; transition: 0.3s; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; }
+    .btn-save { background: var(--accent-1); color: white; width: 100%; }
+    .btn-check-in { background: #10b981; color: white; }
+    .btn-check-out { background: #ef4444; color: white; }
+
+    .primary-highlight { border: 2px solid #fbbf24 !important; background: rgba(251, 191, 36, 0.05) !important; position: relative; }
+    .primary-badge { position: absolute; top: -10px; right: 10px; background: #fbbf24; color: #000; font-size: 0.6rem; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+
+    .table-wrapper { margin-top: 1rem; background: var(--card-bg); border-radius: 10px; border: 1px solid rgba(128,128,128,0.1); overflow: hidden; }
+    .excel-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .excel-table th { background: var(--accent-1); color: white; padding: 8px; text-align: right; }
+    [dir="ltr"] .excel-table th { text-align: left; }
+    .excel-table td { padding: 6px 10px; border-bottom: 1px solid rgba(128,128,128,0.05); }
+    
+    #global-legend { display: none !important; }
+
+    /* EDIT MODE LOGIC */
+    {% if not user.is_superuser %}
+        .detail-container input:not([type="hidden"]), .detail-container select { pointer-events: none; opacity: 0.8; }
+        body.edit-mode .detail-container input, body.edit-mode .detail-container select { pointer-events: auto; opacity: 1; }
+        
+        .btn-save-data { pointer-events: none; opacity: 0.3; filter: grayscale(1); }
+        body.edit-mode .btn-save-data { pointer-events: auto; opacity: 1; filter: none; }
+    {% else %}
+        /* For superusers, everything is always active */
+        .detail-container input, .detail-container select { pointer-events: auto !important; opacity: 1 !important; }
+        .btn-save-data { pointer-events: auto !important; opacity: 1 !important; filter: none !important; }
+    {% endif %}
+
+    #ref-curr-select { display: none !important; }
+    body.edit-mode #ref-curr-select { display: block !important; }
+    body.edit-mode #ref-curr-text { display: none !important; }
+{% endblock %}
+
+{% block content %}
+    <div class="detail-container">
+        <div style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+            <a href="{% url 'room_overview' %}" class="btn-action" style="text-decoration: none; width: auto; background: var(--accent-1); color: white;">← {{ t.back }}</a>
+            <div style="font-size: 1.1rem; font-weight: bold; color: var(--accent-1); flex: 1; text-align: center;">
+                {{ t.room }} #{{ room.number }} ({{ t.capacity }}: {{ room.capacity }})
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn-action btn-check-in" onclick="confirmCheck('in')">{{ t.check_in }}</button>
+                <button class="btn-action btn-check-out" onclick="confirmCheck('out')">{{ t.check_out }}</button>
+            </div>
+        </div>
+
+        <div class="main-grid">
+            <!-- PERSONAL BOX -->
+            <div class="box">
+                <h3>{{ t.guest_personal_info }}</h3>
+                <form method="post" id="main-res-form">
+                    {% csrf_token %}<input type="hidden" name="action" value="save_reservation">
+                    <div class="field-row-2">
+                        <div class="field-group"><label>{{ t.first_name }}:</label><input type="text" name="first_name" id="f_f_name" value="{{ reservation.guest.first_name|default:'' }}" oninput="searchGuests()" required></div>
+                        <div class="field-group"><label>{{ t.id_passport }}:</label><input type="text" name="national_id" id="f_n_id" value="{{ reservation.guest.national_id|default:'' }}" oninput="searchGuests()"></div>
+                    </div>
+                    <div class="field-row-2">
+                        <div class="field-group"><label>{{ t.last_name }}:</label><input type="text" name="last_name" id="f_l_name" value="{{ reservation.guest.last_name|default:'' }}" oninput="searchGuests()" required></div>
+                        <div class="field-group"><label>{{ t.phone }}:</label><input type="text" name="phone" id="f_phone" value="{{ reservation.guest.phone|default:'' }}" required></div>
+                    </div>
+                    <div class="field-row-2">
+                        <div class="field-group"><label>{{ t.middle_name }}:</label><input type="text" name="middle_name" id="f_m_name" value="{{ reservation.guest.middle_name|default:'' }}"></div>
+                        <div class="field-group">
+                            <label>{{ t.source }}:</label>
+                            <select name="source">
+                                {% for s in sources %}<option value="{{ s }}" {% if reservation.source|lower == s %}selected{% endif %}>
+                                    {% if s == 'front_desk' %}{{ t.front_desk }}{% elif s == 'phone' %}{{ t.phone }}{% elif s == 'booking' %}{{ t.booking }}{% elif s == 'expedia' %}{{ t.expedia }}{% else %}{{ s }}{% endif %}
+                                </option>{% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field-row-2">
+                        <div class="field-group"><label>{{ t.check_in }} {{ t.date }}:</label><input type="date" name="check_in_date" value="{{ reservation.check_in_date|date:'Y-m-d'|default:default_check_in }}"></div>
+                        <div class="field-group"><label>{{ t.check_out }} {{ t.date }}:</label><input type="date" name="check_out_date" value="{{ reservation.check_out_date|date:'Y-m-d'|default:default_check_out }}"></div>
+                    </div>
+                    <div class="field-row-2">
+                        <div class="field-group"><label>{{ t.email }}:</label><input type="email" name="email" id="f_email" value="{{ reservation.guest.email|default:'' }}"></div>
+                        <div class="field-group" style="display:flex; align-items: flex-end;">
+                            <button type="submit" class="btn-action btn-save btn-save-data">{{ t.save_reservation }}</button>
+                        </div>
+                    </div>
+                </form>
+
+                <div style="margin-top: 1rem;">
+                    <h4>{{ t.companions }} ({{ companions.count }}/{{ room.capacity }})</h4>
+                    <div class="table-wrapper">
+                        <table class="excel-table">
+                            <thead>
+                                <tr>
+                                    <th>{{ t.guest_name }}</th>
+                                    <th>{{ t.id_passport }}</th>
+                                    <th>{{ t.check_in }}</th>
+                                    <th>{{ t.check_out }}</th>
+                                    <th>{{ t.actions }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for cg in companions %}
+                                <tr {% if cg.is_primary %}class="primary-highlight"{% endif %}>
+                                    <td>
+                                        {% if cg.is_primary %}<span class="primary-badge">PRIMARY</span>{% endif %}
+                                        {{ cg.guest.first_name }} {{ cg.guest.last_name }}
+                                    </td>
+                                    <td>{{ cg.guest.national_id }}</td>
+                                    <td>
+                                        {% if reservation.actual_check_in %}
+                                            {{ reservation.actual_check_in|date:'Y-m-d H:i' }}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if reservation.actual_check_out %}
+                                            {{ reservation.actual_check_out|date:'Y-m-d H:i' }}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <form method="post" style="margin:0;" onsubmit="return confirm('{% if cg.is_primary %}{{ t.confirm_delete_reservation|default:'Deleting the primary guest will remove the entire reservation. Proceed?' }}{% else %}{{ t.confirm_delete_guest|default:'Remove this guest?' }}{% endif %}')">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="action" value="{% if cg.is_primary %}delete_reservation{% else %}delete_guest{% endif %}">
+                                            <input type="hidden" name="guest_id" value="{{ cg.guest.id }}">
+                                            <button type="submit" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size: 0.9rem;">🗑️</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% if reservation and companions.count < room.capacity %}
+                        <form method="post" style="display: flex; gap: 5px; margin-top: 8px;">
+                            {% csrf_token %}<input type="hidden" name="action" value="add_companion">
+                            <input type="text" name="c_first_name" placeholder="{{ t.first_name }}" required style="width: 30%; height: 32px; font-size: 0.8rem;">
+                            <input type="text" name="c_last_name" placeholder="{{ t.last_name }}" required style="width: 30%; height: 32px; font-size: 0.8rem;">
+                            <input type="text" name="c_national_id" placeholder="{{ t.id_passport }}" style="width: 30%; height: 32px; font-size: 0.8rem;">
+                            <button type="submit" class="btn-action btn-save" style="width: 40px; height: 32px;">+</button>
+                        </form>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- FINANCIAL BOX -->
+            <div class="box">
+                <h3>{{ t.financial_info }}</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+                    <!-- Column 1: Financial Summary -->
+                    <div style="min-width: 0;">
+                        <h4 style="margin-top: 0; margin-bottom: 0.8rem; font-size: 0.85rem;">{{ t.amount_payable|default:"Amount Payable" }}</h4>
+                        <form method="post" id="financial-form">
+                            {% csrf_token %}<input type="hidden" name="action" value="update_financials">
+                            <div class="field-group"><label>{{ t.total_amount }}:</label><input type="number" name="total_amount" id="f_total_amount" value="{% if reservation %}{{ reservation.total_amount }}{% else %}0{% endif %}" onchange="this.form.submit()"></div>
+                            <div class="field-group" style="margin-top: 0.5rem;"><label>{{ t.daily_rate }}:</label><input type="number" id="f_daily_rate" value="{{ daily_rate }}" onchange="document.getElementById('f_total_amount').value = Math.round(this.value * NIGHTS); document.getElementById('financial-form').submit();"></div>
+                            <div class="field-group" style="margin-top: 0.5rem;"><label>{{ t.balance_due }}:</label><input type="text" value="{{ balance_due }}" disabled style="color: {% if balance_due > 0 %}#ef4444{% else %}#10b981{% endif %}; font-weight: bold;"></div>
+                        </form>
+                        
+                        <!-- Reference Currency -->
+                        <div style="margin-top: 1.5rem; font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 8px;">
+                            <span>{{ t.ref_currency }}:</span>
+                            <span id="ref-curr-text" style="font-weight: bold; color: var(--accent-1);">TRY</span>
+                            <select id="ref-curr-select" style="display: none; height: 28px; font-size: 0.7rem; padding: 0 5px; border-radius: 4px; border: 1px solid var(--accent-1); background: var(--bg-color); color: var(--text-main);">
+                                {% for c in currencies %}<option value="{{ c }}" {% if c == 'TRY' %}selected{% endif %}>{{ c }}</option>{% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Column 2: New Transaction -->
+                    <div style="border-left: 1px solid rgba(128,128,128,0.1); padding-left: 2rem; min-width: 0;">
+                        <h4 style="margin-top: 0; margin-bottom: 0.8rem; font-size: 0.85rem;">{{ t.new_transaction }}</h4>
+                        <form method="post">
+                            {% csrf_token %}<input type="hidden" name="action" value="add_transaction">
+                            <div class="field-group"><label>{{ t.amount }}:</label><input type="number" step="0.01" name="amount" required></div>
+                            <div style="display: grid; grid-template-columns: 100px 12.5% 1fr 2.5fr; gap: 5px; align-items: center; margin-bottom: 0.4rem;">
+                                <label style="font-size: 0.75rem; color: var(--text-muted);">{{ t.currency }}:</label>
+                                <select name="currency" style="height: 36px; border-radius: 6px; border: 1px solid rgba(128,128,128,0.2); background: var(--bg-color); color: var(--text-main); min-width: 0;">{% for c in currencies %}<option value="{{ c }}" {% if c == 'TRY' %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+                                <label style="font-size: 0.75rem; color: var(--text-muted); text-align: center;">{{ t.rate }}:</label>
+                                <input type="number" step="0.0001" name="rate" value="1.0" style="height: 36px; border-radius: 6px; border: 1px solid rgba(128,128,128,0.2); background: var(--bg-color); color: var(--text-main); min-width: 0;">
+                            </div>
+                            <div class="field-group"><label>{{ t.method }}:</label><select name="p_type">{% for pt in p_types %}<option value="{{ pt }}">{% if pt == 'cash' %}{{ t.cash }}{% elif pt == 'card' %}{{ t.card }}{% elif pt == 'remittance' %}{{ t.remittance }}{% else %}{{ pt }}{% endif %}</option>{% endfor %}</select></div>
+                            <button type="submit" class="btn-action btn-save btn-save-data" style="margin-top: 0.6rem;">{{ t.post_transaction }}</button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Transactions Table -->
+                <div class="table-wrapper">
+                    <table class="excel-table">
+                        <thead>
+                            <tr><th>{{ t.original }}</th><th>{{ t.ref_base }}</th><th>{{ t.method }}</th><th>{{ t.date }}/{{ t.time }}</th><th>{{ t.actions|default:"Actions" }}</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for tr in transactions %}
+                            <tr>
+                                <td>{{ tr.amount_original }} {{ tr.currency }}</td>
+                                <td>{{ tr.amount_ref }}</td>
+                                <td>{% with val=tr.payment_type|lower %}{% if val == 'cash' %}{{ t.cash }}{% elif val == 'card' %}{{ t.card }}{% elif val == 'remittance' %}{{ t.remittance }}{% else %}{{ tr.payment_type }}{% endif %}{% endwith %}</td>
+                                <td>{{ tr.date|date:"m/d" }} {{ tr.time|time:"H:i" }}</td>
+                                <td>
+                                    <form method="post" style="margin:0;" onsubmit="return confirm('{{ t.confirm_delete|default:'Delete this transaction?' }}')">
+                                        {% csrf_token %}<input type="hidden" name="action" value="delete_transaction"><input type="hidden" name="tr_id" value="{{ tr.id }}">
+                                        <button type="submit" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size: 0.9rem;">🗑️</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SEARCH LIST AT BOTTOM -->
+        <div class="table-wrapper" style="margin-top: 2rem;">
+            <div style="background: rgba(128,128,128,0.1); padding: 8px 15px; font-weight: bold; font-size: 0.85rem;">{{ t.previous_guests }}</div>
+            <table class="excel-table">
+                <thead><tr><th>System ID</th><th>{{ t.first_name }} {{ t.last_name }}</th><th>{{ t.id_passport }}</th><th>{{ t.phone }}</th></tr></thead>
+                <tbody id="guest-table-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const NIGHTS = {{ nights|default:1 }};
+        
+        // Clear form if redirected after save
+        if (new URLSearchParams(window.location.search).get('saved') === '1') {
+            const fields = ['f_f_name','f_m_name','f_l_name','f_n_id','f_phone','f_email'];
+            fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+            history.replaceState(null, '', window.location.pathname);
+            const flash = document.createElement('div');
+            flash.textContent = '✅ {{ t.save_reservation|default:"Reservation saved" }}';
+            flash.style.cssText = 'position:fixed;top:80px;left:50%;transform:translateX(-50%);background:#10b981;color:white;padding:10px 24px;border-radius:8px;font-size:0.9rem;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+            document.body.appendChild(flash);
+            setTimeout(() => flash.remove(), 2500);
+        }
+
+        // Bi-directional Financial Linking
+        const totalInput = document.getElementById('f_total_amount');
+        const dailyInput = document.getElementById('f_daily_rate');
+
+        if (totalInput && dailyInput) {
+            totalInput.addEventListener('input', () => {
+                const total = parseFloat(totalInput.value) || 0;
+                dailyInput.value = Math.floor(total / NIGHTS);
+            });
+            dailyInput.addEventListener('input', () => {
+                const daily = parseFloat(dailyInput.value) || 0;
+                totalInput.value = daily * NIGHTS;
+            });
+        }
+
+        function toggleEditMode() {
+            // This function is kept for compatibility if needed, 
+            // but the actual logic is now handled by toggleGlobalEditMode in base.html
+            const select = document.getElementById('ref-curr-select');
+            const text = document.getElementById('ref-curr-text');
+            if (document.body.classList.contains('edit-mode')) {
+                if (select) select.style.display = 'block';
+                if (text) text.style.display = 'none';
+            } else {
+                if (select) select.style.display = 'none';
+                if (text) text.style.display = 'block';
+            }
+        }
+
+        // Intercept global toggle to ensure room-specific UI updates if necessary
+        const originalToggle = window.toggleGlobalEditMode;
+        window.toggleGlobalEditMode = function() {
+            if (typeof originalToggle === 'function') originalToggle();
+            // Local UI reactions to class change if needed
+        };
+
+        async function confirmCheck(type) {
+            if (type === 'out') {
+                const today = new Date().toISOString().split('T')[0];
+                const checkOutDate = '{{ reservation.check_out_date|date:"Y-m-d" }}';
+                let cancelFuture = false;
+                if (checkOutDate > today) {
+                    cancelFuture = confirm('آیا می‌خواهید رزروهای روزهای بعد را به علت خروج زودتر از موعد لغو کنید؟');
+                }
+                const confirmOut = confirm('Confirm Check-out?');
+                if (confirmOut) {
+                    const fd = new FormData();
+                    fd.append('action', 'check_action');
+                    fd.append('type', 'out');
+                    if (cancelFuture) fd.append('cancel_future', '1');
+                    await fetch(window.location.href, { method: 'POST', body: fd, headers: { 'X-CSRFToken': '{{ csrf_token }}' } });
+                    window.location.href = '{% url "room_overview" %}';
+                }
+            } else {
+                const confirmIn = confirm('Confirm Check-in?');
+                if (confirmIn) {
+                    const fd = new FormData();
+                    fd.append('action', 'check_action');
+                    fd.append('type', 'in');
+                    await fetch(window.location.href, { method: 'POST', body: fd, headers: { 'X-CSRFToken': '{{ csrf_token }}' } });
+                    location.reload();
+                }
+            }
+        }
+        
+        let allGuests = [];
+        async function loadAllGuests() {
+            const res = await fetch(`/rooms/api/guest-search/?q=`);
+            allGuests = await res.json();
+            renderGuestTable(allGuests);
+        }
+        function renderGuestTable(data) {
+            const body = document.getElementById('guest-table-body');
+            body.innerHTML = '';
+            data.forEach(g => {
+                const tr = document.createElement('tr');
+                tr.style.cursor = 'pointer';
+                tr.title = 'Double-click to fill form';
+                tr.innerHTML = `<td>${g.guest_number || '-'}</td><td>${g.first_name} ${g.last_name}</td><td>${g.national_id || g.passport_number || ''}</td><td>${g.phone || ''}</td>`;
+                tr.ondblclick = () => {
+                    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+                    setVal('f_f_name', g.first_name);
+                    setVal('f_m_name', g.middle_name);
+                    setVal('f_l_name', g.last_name);
+                    setVal('f_n_id', g.national_id || g.passport_number);
+                    setVal('f_phone', g.phone);
+                    setVal('f_email', g.email);
+                    // Highlight the selected row
+                    document.querySelectorAll('#guest-table-body tr').forEach(r => r.style.background = '');
+                    tr.style.background = 'rgba(59,130,246,0.15)';
+                };
+                tr.onmouseenter = () => tr.style.background = 'rgba(128,128,128,0.08)';
+                tr.onmouseleave = () => { if (!tr.classList.contains('selected')) tr.style.background = ''; };
+                body.appendChild(tr);
+            });
+        }
+        function searchGuests() {
+            const fn = document.getElementById('f_f_name').value.toLowerCase();
+            const ln = document.getElementById('f_l_name').value.toLowerCase();
+            const ni = document.getElementById('f_n_id').value.toLowerCase();
+            const filtered = allGuests.filter(g => (g.first_name.toLowerCase().includes(fn)) && (g.last_name.toLowerCase().includes(ln)) && (g.national_id && g.national_id.toLowerCase().includes(ni)));
+            renderGuestTable(filtered);
+        }
+        window.onload = loadAllGuests;
+    </script>
+{% endblock %}

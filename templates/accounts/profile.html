@@ -1,0 +1,68 @@
+{% load i18n %}
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>پروفایل کاربری</title>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Vazirmatn', sans-serif; background: #0f172a; color: #fff; padding: 2rem; margin: 0; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .card { background: rgba(30, 41, 59, 0.9); padding: 2rem; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1); margin-bottom: 2rem; }
+        input { width: 100%; padding: 0.75rem; margin-bottom: 1rem; border-radius: 6px; border: 1px solid #64748b; background: #1e293b; color: white; box-sizing: border-box; }
+        input[readonly] { background: #0f172a; color: #94a3b8; }
+        .btn { background: #3b82f6; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .btn:hover { background: #2563eb; }
+        .log-list { list-style-type: none; padding: 0; }
+        .log-item { background: #1e293b; padding: 1rem; margin-bottom: 0.5rem; border-radius: 6px; border-left: 4px solid #10b981; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h2>اطلاعات فردی</h2>
+            {% if message %}<p style="color: #10b981;">{{ message }}</p>{% endif %}
+            <form method="post">
+                {% csrf_token %}
+                <label>ایمیل (غیرقابل تغییر)</label>
+                <input type="email" value="{{ user.email }}" readonly>
+                
+                <label>نام</label>
+                <input type="text" name="first_name" value="{{ user.first_name }}" required>
+                
+                <label>نام خانوادگی</label>
+                <input type="text" name="last_name" value="{{ user.last_name }}" required>
+                
+                <label>رمز عبور جدید (اگر می‌خواهید تغییر دهید)</label>
+                <input type="password" name="password" placeholder="رمز عبور جدید">
+                
+                <button type="submit" class="btn">ذخیره تغییرات</button>
+            </form>
+        </div>
+        
+        <div class="card">
+            <h2>{% if user.role %}{{ user.role.name }}{% else %}بدون نقش{% endif %}</h2>
+            <p><strong>شرح وظایف:</strong> {{ user.role.description|default:"شرح وظایفی برای این نقش ثبت نشده است." }}</p>
+        </div>
+        
+        <div class="card">
+            <h2>فعالیت‌های اخیر شما (Log)</h2>
+            <ul class="log-list">
+                {% for log in logs %}
+                    <li class="log-item">
+                        <strong>{{ log.action }}</strong>
+                        <span style="float: left; font-size: 0.8rem; color: #94a3b8;">{{ log.timestamp|date:"Y-m-d H:i" }}</span>
+                    </li>
+                {% empty %}
+                    <li class="log-item">هنوز فعالیتی ثبت نشده است.</li>
+                {% endfor %}
+            </ul>
+        </div>
+        
+        <a href="/" class="btn" style="background:#64748b;">بازگشت به داشبورد</a>
+        {% if user.is_staff %}
+            <a href="/admin/" class="btn" style="background:#f59e0b; margin-right: 10px;">ورود به پنل مدیریت</a>
+        {% endif %}
+    </div>
+</body>
+</html>

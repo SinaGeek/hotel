@@ -1,0 +1,38 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <style>
+        #header { position: relative; }
+        .admin-lang-switcher {
+            position: absolute;
+            top: 10px;
+            left: 20px;
+            display: flex;
+            gap: 10px;
+            z-index: 1000;
+        }
+        .admin-lang-switcher form button {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1.2rem;
+            padding: 0;
+        }
+    </style>
+{% endblock %}
+
+{% block branding %}
+    <div class="admin-lang-switcher">
+        <form action="{% url 'set_language' %}" method="post">
+            {% csrf_token %}
+            <input name="next" type="hidden" value="{{ request.get_full_path }}">
+            <input name="language" type="hidden" id="admin-lang-input">
+            <button type="button" onclick="document.getElementById('admin-lang-input').value='en'; this.form.submit();">🇺🇸</button>
+            <button type="button" onclick="document.getElementById('admin-lang-input').value='tr'; this.form.submit();">🇹🇷</button>
+            <button type="button" onclick="document.getElementById('admin-lang-input').value='fa'; this.form.submit();">🇮🇷</button>
+        </form>
+    </div>
+    {{ block.super }}
+{% endblock %}
