@@ -3,6 +3,8 @@ from django.contrib.auth.decorators import login_required
 from .models import Room, RoomType
 from apps.reservations.models import Reservation
 import datetime
+from django.db.models import Count
+from django.utils.translation import gettext as _
 
 @login_required
 def room_overview_view(request):
@@ -18,7 +20,7 @@ def room_overview_view(request):
                 name_tr = request.POST.get('name_tr')
                 name_fa = request.POST.get('name_fa')
                 if not name_en or not name_tr or not name_fa:
-                    return JsonResponse({'error': 'ارائه هر سه زبان الزامی است.'}, status=400)
+                    return JsonResponse({'error': _('Providing all three languages is required.')}, status=400)
                 RoomType.objects.create(name_en=name_en, name_tr=name_tr, name_fa=name_fa, hotel_id=hotel_id)
             elif action == 'add_rooms':
                 type_id = request.POST.get('type_id')
@@ -94,15 +96,48 @@ def room_overview_view(request):
     if group_by == 'floor':
         order = ['floor', 'number']
     else:
-        order = ['room_type__name_en', 'number']
+        # Order by base_rate first, but MUST include room_type to ensure 
+        # that rooms of the same type are contiguous for the 'regroup' tag.
+        order = ['room_type__base_rate', 'room_type', 'number']
         
-    from django.db.models import Prefetch
-    active_reservations = Reservation.objects.filter(check_in_date__lte=current_date, check_out_date__gt=current_date)
-    rooms = Room.objects.all().select_related('room_type').prefetch_related(
-        Prefetch('reservation_set', queryset=active_reservations, to_attr='active_res')
-    ).order_by(*order)
+    hotel_id = user.hotel_id or 1
+    from django.db.models import Prefetch, Q
+    # Fetch reservations that are: staying today OR arriving today OR departing today
+    active_reservations = Reservation.objects.filter(
+        Q(check_in_date=current_date) | Q(check_out_date=current_date) | 
+        (Q(check_in_date__lt=current_date) & Q(check_out_date__gt=current_date)),
+        hotel_id=hotel_id
+    )
+    rooms = Room.objects.filter(hotel_id=hotel_id).select_related('room_type').prefetch_related(
+        Prefetch('reservation_set', queryset=active_reservations, to_attr='active_res_list')
+    ).annotate(room_count=Count('room_type__rooms')).order_by(*order)
     
-    room_types = RoomType.objects.all()
+    # Process room flags for template
+    for room in rooms:
+        room.is_arrival = False
+        room.is_departure = False
+        room.arrival_occupied = False
+        room.current_res = None
+        
+        # Determine operational flags
+        for res in room.active_res_list:
+            if res.check_in_date == current_date:
+                room.is_arrival = True
+                room.current_res = res # Arrival guest is primary for today's view
+                if res.is_occupied:
+                    room.arrival_occupied = True
+            if res.check_out_date == current_date:
+                room.is_departure = True
+                if not room.current_res:
+                    room.current_res = res # Use departure guest if no arrival
+            if res.check_in_date < current_date and res.check_out_date > current_date:
+                room.current_res = res # Staying guest is primary
+        
+        room.has_debt = False
+        if room.current_res:
+            room.has_debt = not room.current_res.is_paid
+
+    room_types = RoomType.objects.filter(hotel_id=hotel_id)
     
     # Calculate Matrix Data
     matrix_data = []
@@ -148,6 +183,8 @@ def room_overview_view(request):
         'next_date': next_date,
         'matrix_data': matrix_data,
         'dirty_reserved_rooms': [room for room in rooms if room.status == 'DIRTY' and room.active_res and not room.active_res[0].is_paid and not room.active_res[0].is_occupied],
+        'now': datetime.datetime.now(),
+        'old_threshold': datetime.datetime.now() - datetime.timedelta(days=7),
     }
     return render(request, 'rooms/overview.html', context)
 
@@ -155,6 +192,7 @@ def room_overview_view(request):
 def guest_search_view(request):
     from django.http import JsonResponse
     from apps.guests.models import Guest
+    from django.db import models
     q = request.GET.get('q', '')
     hotel_id = request.user.hotel_id or 1
     
@@ -205,6 +243,7 @@ def context_menu_action_view(request):
                 res.is_occupied = False
                 res.check_out_time = datetime.datetime.now().time()
                 room.status = 'DIRTY'
+                room.is_clean = False
             res.save()
             room.save()
     
@@ -221,6 +260,15 @@ def room_detail_view(request, room_id):
     hotel_id = request.user.hotel_id or 1
     room = get_object_or_404(Room, id=room_id, hotel_id=hotel_id)
     today = datetime.date.today()
+    
+    # Use selected date from overview if provided
+    selected_date_str = request.GET.get('date')
+    if selected_date_str:
+        try:
+            today = datetime.datetime.strptime(selected_date_str, '%Y-%m-%d').date()
+        except:
+            pass
+            
     tomorrow = today + datetime.timedelta(days=1)
     
     reservation = Reservation.objects.filter(room=room, check_in_date__lte=today, check_out_date__gt=today).first()
@@ -229,18 +277,28 @@ def room_detail_view(request, room_id):
         action = request.POST.get('action')
         
         if action == 'save_reservation':
+            if not (request.user.is_admin or request.user.is_reception):
+                from django.http import HttpResponseForbidden
+                return HttpResponseForbidden("You don't have permission to manage reservations.")
+
             # Get guest info from form
             f_name = request.POST.get('first_name'); m_name = request.POST.get('middle_name', ''); l_name = request.POST.get('last_name')
             phone = request.POST.get('phone'); n_id = request.POST.get('national_id'); email = request.POST.get('email')
             source = request.POST.get('source', 'FRONT_DESK'); check_in = request.POST.get('check_in_date'); check_out = request.POST.get('check_out_date')
             check_in_t = request.POST.get('check_in_time', '14:00'); check_out_t = request.POST.get('check_out_time', '12:00')
+            total_amount = request.POST.get('total_amount')
             
             guest, _ = Guest.objects.get_or_create(first_name=f_name, last_name=l_name, hotel_id=hotel_id, defaults={'middle_name': m_name, 'phone': phone, 'national_id': n_id, 'email': email})
             guest.middle_name = m_name; guest.phone = phone; guest.national_id = n_id; guest.email = email; guest.save()
             
             if not reservation:
                 # No reservation yet — create one with this guest as primary
-                reservation = Reservation.objects.create(room=room, guest=guest, check_in_date=check_in, check_out_date=check_out, check_in_time=check_in_t, check_out_time=check_out_t, hotel_id=hotel_id, source=source)
+                # If total_amount not provided, it will default to 0 (but we should probably calculate it in the form)
+                reservation = Reservation.objects.create(
+                    room=room, guest=guest, check_in_date=check_in, check_out_date=check_out, 
+                    check_in_time=check_in_t, check_out_time=check_out_t, hotel_id=hotel_id, 
+                    source=source, total_amount=total_amount or 0
+                )
                 ReservationGuest.objects.get_or_create(reservation=reservation, guest=guest, hotel_id=hotel_id, defaults={'is_primary': True})
             else:
                 # Reservation exists — add this guest as a companion (if room has capacity)
@@ -249,8 +307,16 @@ def room_detail_view(request, room_id):
                 # Also update reservation dates/source in case they changed
                 reservation.check_in_date = check_in; reservation.check_out_date = check_out
                 reservation.check_in_time = check_in_t; reservation.check_out_time = check_out_t
-                reservation.source = source; reservation.save()
-            return redirect(f"{request.path}?saved=1")
+                reservation.source = source
+                if total_amount:
+                    reservation.total_amount = total_amount
+                reservation.save()
+            date_param = request.GET.get('date')
+            from django.urls import reverse
+            redirect_url = reverse('room_overview')
+            if date_param:
+                redirect_url += f"?date={date_param}"
+            return redirect(redirect_url)
 
         elif action == 'add_companion':
             if reservation and reservation.guests.count() < room.capacity:
@@ -298,6 +364,7 @@ def room_detail_view(request, room_id):
                     reservation.actual_check_out = now
                     reservation.check_out_time = now.time()
                     room.status = 'DIRTY'
+                    room.is_clean = False
                     if request.POST.get('cancel_future'):
                         reservation.check_out_date = now.date()
                 reservation.save(); room.save()
@@ -307,15 +374,31 @@ def room_detail_view(request, room_id):
     # Context calculations
     companions = reservation.guests.all() if reservation else []
     transactions = reservation.transactions.all().order_by('-id') if reservation else []
-    daily_rate = 0
     days = 1
     if reservation:
         days = (reservation.check_out_date - reservation.check_in_date).days or 1
         daily_rate = math.floor(reservation.total_amount / days)
+    else:
+        # For new reservation, default to base rate
+        daily_rate = float(room.room_type.base_rate)
+        # We don't have a reservation object yet, but we can calculate a "preview" total
+        # assuming 1 night if no dates selected yet, or based on default dates
+        default_days = (tomorrow - today).days or 1
+        preview_total = daily_rate * default_days
 
     balance_due = 0
     if reservation:
         balance_due = (reservation.total_amount or 0) - (reservation.paid_amount or 0)
+
+    # Permission Flags
+    can_manage_reservation = request.user.is_admin or request.user.is_reception
+    can_view_financials = request.user.is_admin or request.user.is_reception or request.user.is_financial
+    can_edit_financials = request.user.is_admin # Only admin can edit total amount once set? 
+    # Actually user says: "reception should has access to chnage [price] during register"
+    if not reservation:
+        can_edit_price = request.user.is_reception or request.user.is_admin
+    else:
+        can_edit_price = request.user.is_admin # Maybe only admin can change price after it's saved
 
     context = {
         'room': room, 'reservation': reservation, 'companions': companions, 'transactions': transactions, 'daily_rate': daily_rate,
@@ -323,6 +406,12 @@ def room_detail_view(request, room_id):
         'default_check_in': today.strftime('%Y-%m-%d'), 'default_check_out': tomorrow.strftime('%Y-%m-%d'),
         'sources': ['front_desk', 'phone', 'booking', 'expedia'], 
         'currencies': ['TRY', 'USD', 'EUR', 'GBP', 'IRR'], 
-        'p_types': ['cash', 'card', 'remittance']
+        'p_types': ['cash', 'card', 'remittance'],
+        'can_manage_reservation': can_manage_reservation,
+        'can_view_financials': can_view_financials,
+        'can_edit_price': can_edit_price,
     }
+    if not reservation:
+        context['preview_total'] = preview_total
+
     return render(request, 'rooms/room_detail.html', context)

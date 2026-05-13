@@ -2,8 +2,11 @@
 from .translation_data import TRANSLATIONS
 
 def translation_processor(request):
-    # Determine current language (default to 'fa')
-    lang_code = request.LANGUAGE_CODE if hasattr(request, 'LANGUAGE_CODE') else 'fa'
+    from django.utils.translation import get_language
+    lang_code = get_language() or 'fa'
+    # Use only the base language code (e.g., 'en' from 'en-us')
+    lang_code = lang_code.split('-')[0]
+    
     if lang_code not in TRANSLATIONS['_meta']:
         lang_code = 'fa'
     
@@ -18,5 +21,6 @@ def translation_processor(request):
         't': lang_strings,
         'lang_meta': TRANSLATIONS['_meta'][lang_code],
         'current_lang': lang_code,
-        'available_langs': TRANSLATIONS['_meta']
+        'available_langs': TRANSLATIONS['_meta'],
+        'view_type': request.GET.get('view', 'large'),
     }

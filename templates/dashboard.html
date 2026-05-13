@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% load i18n %}
 
-{% block title %}Dashboard{% endblock %}
+{% block title %}{% trans "Dashboard" %}{% endblock %}
+{% block page_title %}{% trans "Management Dashboard" %}{% endblock %}
 
 {% block extra_css %}
         .container { max-width: 1400px; margin: 0 auto; padding: 2rem; position: relative; }
@@ -22,68 +23,132 @@
         .edit-input { display: none; width: 50px; background: rgba(128,128,128,0.1); border: 1px solid var(--accent-1); color: var(--text-main); border-radius: 4px; padding: 2px 5px; }
         body.edit-mode .edit-input { display: inline-block; }
         body.edit-mode .display-val { display: none; }
+        
+        .pending-users-box { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 15px; padding: 1.5rem; margin-bottom: 2rem; }
+        .pending-user-item { display: flex; justify-content: space-between; align-items: center; padding: 0.8rem 0; border-bottom: 1px solid rgba(239, 68, 68, 0.1); }
+        .pending-user-item:last-child { border-bottom: none; }
+        .btn-approve { background: #10b981; color: white; padding: 5px 12px; border-radius: 6px; text-decoration: none; font-size: 0.8rem; margin-right: 5px; }
+        .btn-reject { background: #ef4444; color: white; padding: 5px 12px; border-radius: 6px; text-decoration: none; font-size: 0.8rem; }
 {% endblock %}
 
 {% block content %}
     <div class="container">
         <header class="main-header" style="margin-top: 2rem;">
-            <div>
-                <h1 style="margin:0; font-size: 2.2rem; background: linear-gradient(to right, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{% if LANGUAGE_CODE == 'fa' %}داشبورد مدیریت{% else %}Management Dashboard{% endif %}</h1>
-                <p style="color: var(--text-muted); margin: 5px 0 0 0;">{{ hotel.name|default:"Grand Hotel" }} - {% now "DATE_FORMAT" %}</p>
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div>
+                    <h1 style="margin:0; font-size: 2.2rem; background: linear-gradient(to right, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{% trans "Management Dashboard" %}</h1>
+                    <p style="color: var(--text-muted); margin: 5px 0 0 0;">{{ hotel.name|default:"Grand Hotel" }} - {% now "DATE_FORMAT" %}</p>
+                </div>
             </div>
         </header>
+
+        {% if pending_users %}
+        <div class="pending-users-box">
+            <h3 style="margin-top: 0; color: #ef4444; font-size: 1rem;">⚠️ {% trans "Pending Registrations" %}</h3>
+            {% for u in pending_users %}
+            <div class="pending-user-item">
+                <span>{{ u.email }} ({{ u.first_name }} {{ u.last_name }})</span>
+                <div>
+                    <a href="{% url 'activate_user' u.id %}" class="btn-approve">{% trans "Approve" %}</a>
+                    <a href="{% url 'reject_user' u.id %}" class="btn-reject" onclick="return confirm('{% trans "Are you sure?" %}')">{% trans "Reject" %}</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
 
         <form id="dashboard-form" method="post">
             {% csrf_token %}
             <div class="stat-grid">
-                <!-- Overview Card (Clickable) -->
-                <a href="{% if not body_edit_mode %}{% url 'room_overview' %}{% else %}#{% endif %}" class="card" id="overview-card">
-                    <h3>{% if LANGUAGE_CODE == 'fa' %}نمای کلی هتل{% else %}Hotel Overview{% endif %}</h3>
+                <!-- Overview Card -->
+                <a href="{% url 'room_overview' %}" class="card" id="overview-card">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <h3>{% trans "Hotel Overview" %}</h3>
+                        <span style="font-size: 0.7rem; color: var(--accent-1); background: rgba(59, 130, 246, 0.1); padding: 2px 6px; border-radius: 4px;">{{ t.vacant|default:"Vacant" }} / {{ t.reserved|default:"Reserved" }} / {{ t.total|default:"Total" }}</span>
+                    </div>
                     <div class="value">{{ total_rooms }}</div>
                     <div class="room-status-list">
                         {% if room_stats_list %}
                             {% for stat in room_stats_list %}
-                                <div>{{ stat.name }}: <span class="display-val">{{ stat.total }}</span> <input type="number" name="room_count_{{ stat.id }}" value="{{ stat.total }}" class="edit-input"></div>
+                                <div onclick="event.stopPropagation(); window.location='{% url 'room_overview' %}?type={{ stat.id }}'" style="cursor: pointer; padding: 4px; border-radius: 4px; transition: 0.2s;" onmouseover="this.style.background='rgba(59, 130, 246, 0.1)'" onmouseout="this.style.background='none'">
+                                    {{ stat.name }}: <span class="display-val">{{ stat.display }}</span>
+                                    <input type="number" name="room_count_{{ stat.id }}" value="{{ stat.total }}" class="edit-input" onclick="event.stopPropagation()">
+                                </div>
                             {% endfor %}
                         {% else %}
-                            <div style="font-size: 0.8rem; color: var(--text-muted);">{% if LANGUAGE_CODE == 'fa' %}هیچ نوع اتاقی موجود نیست{% else %}No room types available{% endif %}</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted);">{% trans "No room types available" %}</div>
                         {% endif %}
                     </div>
                 </a>
 
-                <div class="card">
-                    <h3>{% if LANGUAGE_CODE == 'fa' %}وضعیت نظافت{% else %}Housekeeping{% endif %}</h3>
+                <!-- Housekeeping Card -->
+                <a href="{% url 'housekeeping_overview' %}" class="card" style="text-decoration: none; color: inherit;">
+                    <h3>{% trans "Housekeeping" %}</h3>
                     <div class="value">{{ total_rooms }}</div>
                     <div class="room-status-list">
-                        <div style="color: var(--accent-2);">{% if LANGUAGE_CODE == 'fa' %}تمیز:{% else %}Clean:{% endif %} <span class="display-val">{{ room_clean_stats.clean }}</span></div>
-                        <div style="color: #f87171;">{% if LANGUAGE_CODE == 'fa' %}کثیف:{% else %}Dirty:{% endif %} <span class="display-val">{{ room_clean_stats.dirty }}</span></div>
+                        <div style="color: var(--accent-2);">{% trans "Clean:" %} <span class="display-val">{{ room_clean_stats.clean }}</span></div>
+                        <div style="color: #f87171;">{% trans "Dirty:" %} <span class="display-val">{{ room_clean_stats.dirty }}</span></div>
                     </div>
-                </div>
+                </a>
 
-                <div class="card">
-                    <h3>{% if LANGUAGE_CODE == 'fa' %}رزروها و مهمانان{% else %}Reservations{% endif %}</h3>
-                    <div class="value">{{ total_guests }}</div>
-                    <div class="trend">↑ 12% {% if LANGUAGE_CODE == 'fa' %}نسبت به دیروز{% else %}vs yesterday{% endif %}</div>
-                    <div class="room-status-list">
-                        <div>{% if LANGUAGE_CODE == 'fa' %}رزروهای امروز:{% else %}Today's Reservations:{% endif %} <span class="display-val">{{ total_reservations }}</span></div>
-                    </div>
-                </div>
-
-                <div class="card">
-                    <h3>{% if LANGUAGE_CODE == 'fa' %}موجودی انبار{% else %}Inventory Stock{% endif %}</h3>
+                <!-- Inventory Stock Card -->
+                <a href="{% url 'inventory_list' %}" class="card" style="text-decoration: none; color: inherit;">
+                    <h3>{% trans "Inventory Stock" %}</h3>
                     <div class="value">{{ total_inventory }}</div>
                     <div class="room-status-list">
                         {% for item in low_stock %}
                             <div style="color: #fb923c; font-size: 0.8rem;">⚠️ {{ item.name }} ({{ item.quantity }})</div>
                         {% endfor %}
+                        {% if not low_stock %}
+                            <div style="color: #10b981; font-size: 0.8rem;">✅ {% trans "Stock is healthy" %}</div>
+                        {% endif %}
                     </div>
-                </div>
+                </a>
+
+                <!-- Financial Card -->
+                <a href="{% url 'guest_list' %}" class="card" style="text-decoration: none; color: inherit;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <h3>{{ t.financial_info|default:"Financial Info" }}</h3>
+                        <span style="font-size: 1.2rem;">💰</span>
+                    </div>
+                    <div class="value" style="font-size: 1.6rem; color: #10b981;">+{{ financials.today_revenue|floatformat:0 }} <span style="font-size: 0.8rem;">TRY</span></div>
+                    <div class="room-status-list">
+                        <div style="margin-top: 5px;">{{ t.today_revenue|default:"Today's Revenue" }}: <span style="font-weight: bold; color: #10b981;">{{ financials.today_revenue|floatformat:0 }}</span></div>
+                        <div style="margin-top: 5px;">{{ t.balance_due|default:"Pending Balance" }}: <span style="font-weight: bold; color: #ef4444;">{{ financials.total_pending|floatformat:0 }}</span></div>
+                    </div>
+                </a>
             </div>
         </form>
     </div>
-{% endblock %}
 
-{% block extra_js %}
+    <!-- Dashboard Glossary -->
+    <div id="glossaryModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:10000; align-items:center; justify-content:center;" onclick="if(event.target == this) toggleGlossary()">
+        <div style="background:var(--card-bg); padding:2rem; border-radius:20px; width:450px; box-shadow: 0 20px 50px rgba(0,0,0,0.3);">
+            <h3 style="margin-top: 0; color: var(--accent-1); border-bottom: 1px solid rgba(128,128,128,0.1); padding-bottom: 10px;">📖 {% trans "Dashboard Guide" %}</h3>
+            
+            <div style="display: flex; flex-direction: column; gap: 1.5rem; margin-top: 1rem; font-size: 0.9rem;">
+                <div>
+                    <strong>🏨 {% trans "Hotel Overview" %}:</strong>
+                    <p style="margin: 5px 0 0 0; color: var(--text-muted);">{% trans "Real-time summary of room occupancy. Click the card for detailed room views." %}</p>
+                </div>
+                <div>
+                    <strong>🧹 {% trans "Housekeeping" %}:</strong>
+                    <p style="margin: 5px 0 0 0; color: var(--text-muted);">{% trans "Shows cleaning progress. 'Dirty' indicates rooms ready for housekeeping." %}</p>
+                </div>
+                <div>
+                    <strong>📦 {% trans "Inventory" %}:</strong>
+                    <p style="margin: 5px 0 0 0; color: var(--text-muted);">{% trans "Monitors stock levels. Yellow alerts indicate items that need restock." %}</p>
+                </div>
+                <div>
+                    <strong>💰 {% trans "Financials" %}:</strong>
+                    <p style="margin: 5px 0 0 0; color: var(--text-muted);">{% trans "Today's revenue and pending payments overview." %}</p>
+                </div>
+            </div>
+
+            <button onclick="toggleGlossary()" style="width: 100%; padding: 12px; background: var(--accent-1); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; margin-top: 2rem;">{% trans "Close" %}</button>
+        </div>
+    </div>
+
     <script>
         function toggleEditMode() {
             document.body.classList.toggle('edit-mode');

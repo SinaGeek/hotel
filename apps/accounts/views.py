@@ -3,16 +3,18 @@ from django.contrib.auth import get_user_model, authenticate, login, logout
 from django.core.mail import send_mail
 from django.urls import reverse
 from django.conf import settings
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
+from django.utils.translation import gettext as _
+from django.core.exceptions import PermissionDenied
 
 User = get_user_model()
 
 @login_required
 def logout_view(request):
     logout(request)
-    return redirect('login')
+    return redirect('dashboard')
 
 @login_required
 def profile_view(request):
@@ -23,13 +25,18 @@ def profile_view(request):
         password = request.POST.get('password')
         if password:
             request.user.set_password(password)
+        if 'avatar' in request.FILES:
+            request.user.avatar = request.FILES['avatar']
         request.user.save()
         
-        # Log the activity
-        ActivityLog.objects.create(user=request.user, action="بروزرسانی اطلاعات کاربری", is_visible_to_user=True)
+        ActivityLog.objects.create(
+            user=request.user, 
+            action=_("Profile Updated"), 
+            is_visible_to_user=True
+        )
         
         return render(request, 'accounts/profile.html', {
-            'message': 'اطلاعات با موفقیت ذخیره شد.',
+            'message': _('Information saved successfully.'),
             'logs': ActivityLog.objects.filter(user=request.user, is_visible_to_user=True)
         })
     
@@ -39,138 +46,126 @@ def profile_view(request):
     return render(request, 'accounts/profile.html', context)
 
 def login_view(request):
+    # 1. If already logged in, get them out of the login page
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+
+    # 2. Handle AJAX email checks
+    if request.GET.get('check_email'):
+        email = request.GET.get('check_email')
+        exists = User.objects.filter(Q(email=email) | Q(username=email)).exists()
+        return JsonResponse({'exists': exists})
+
+    # 3. Handle Login Attempt
     if request.method == 'POST':
-        login_id = request.POST.get('email') # This field can be email or username
+        email = request.POST.get('email')
         password = request.POST.get('password')
         
-        # Check if user exists by email or username
-        user_exists = User.objects.filter(Q(email=login_id) | Q(username=login_id)).exists()
-        
-        if not user_exists:
-            # User doesn't exist, redirect to register with email prepopulated if it looks like an email
-            return redirect(f"{reverse('register')}?email={login_id}")
-            
-        # Try authenticating with email as username first
-        user = authenticate(request, username=login_id, password=password)
-        
-        # If that fails, try finding the user by email and then authenticating with their username
-        if user is None:
-            user_obj = User.objects.filter(email=login_id).first()
-            if user_obj:
-                user = authenticate(request, username=user_obj.username, password=password)
+        if not password:
+            return render(request, 'accounts/login.html', {'error': _('Password required'), 'initial_email': email})
 
-        if user is not None:
-            login(request, user)
-            from .models import ActivityLog
-            ActivityLog.objects.create(user=user, action="ورود به سیستم")
-            if user.is_staff:
-                return redirect('/admin/')
-            return redirect('/')
+        user_obj = User.objects.filter(Q(email=email) | Q(username=email)).first()
+        
+        if user_obj:
+            user = authenticate(request, username=user_obj.username, password=password)
+            if user is not None:
+                login(request, user)
+                return redirect('dashboard')
+            else:
+                return render(request, 'accounts/login.html', {'error': _('Invalid password'), 'initial_email': email})
         else:
-            return render(request, 'accounts/login.html', {'error': 'رمز عبور یا شناسه اشتباه است یا اکانت شما هنوز فعال نشده است.'})
+            # User doesn't exist, send to register
+            return redirect(f"{reverse('register')}?email={email}")
+
+    # 4. Fallback: Always render the login page for GET requests
     return render(request, 'accounts/login.html')
 
 def register_view(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+
     if request.method == 'POST':
         email = request.POST.get('email')
         password = request.POST.get('password')
         first_name = request.POST.get('first_name')
         last_name = request.POST.get('last_name')
         
-        user_qs = User.objects.filter(email=email)
-        if user_qs.exists():
-            if not user_qs.first().is_active:
-                return render(request, 'accounts/register.html', {'error': 'درخواست قبلی شما در دست بررسی است مجددا تلاش نکنید و منتظر پیام ادمین باشید.'})
-            return render(request, 'accounts/register.html', {'error': 'این ایمیل قبلا ثبت و فعال شده است.'})
-            
-        user = User.objects.create_user(
+        if User.objects.filter(email=email).exists():
+            return render(request, 'accounts/login.html', {
+                'error': _('Email already exists.'), 
+                'initial_email': email
+            })
+
+        new_user = User.objects.create_user(
             username=email, email=email, password=password,
             first_name=first_name, last_name=last_name, is_active=False
         )
         
-        activation_link = request.build_absolute_uri(reverse('activate_user', args=[user.id]))
-        rejection_link = request.build_absolute_uri(reverse('reject_user', args=[user.id]))
+        activation_link = request.build_absolute_uri(reverse('activate_user', args=[new_user.id]))
+        rejection_link = request.build_absolute_uri(reverse('reject_user', args=[new_user.id]))
+        
         send_mail(
-            'درخواست عضویت جدید',
-            f'کاربر جدیدی ({email}) ثبت نام کرده است.\n\nبرای تایید: {activation_link}\nبرای رد درخواست: {rejection_link}',
+            _('New Membership Request'),
+            _('User {email} registered.\nApprove: {activation_link}\nReject: {rejection_link}').format(
+                email=email, activation_link=activation_link, rejection_link=rejection_link
+            ),
             settings.DEFAULT_FROM_EMAIL,
             [admin_email for admin_name, admin_email in settings.ADMINS],
             fail_silently=False,
         )
         return render(request, 'accounts/registration_success.html')
+
     initial_email = request.GET.get('email', '')
     return render(request, 'accounts/register.html', {'initial_email': initial_email})
 
+@login_required
 def activate_user_view(request, user_id):
     if not request.user.is_superuser:
-        return HttpResponse("Unauthorized.", status=403)
+        return HttpResponse(_("Forbidden"), status=403)
         
-    from .models import Role
+    from .models import Role, ActivityLog
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return HttpResponse(_("User not found"), status=404)
+
     if request.method == 'POST':
         role_id = request.POST.get('role_id')
-        if not role_id:
-            return HttpResponse("انتخاب نقش الزامی است.", status=400)
-            
         try:
-            user = User.objects.get(id=user_id)
             role = Role.objects.get(id=role_id)
             user.role = role
             user.is_active = True
             user.save()
-            
-            from .models import ActivityLog
-            ActivityLog.objects.create(user=user, action=f"تایید عضویت با نقش {role.name}", is_visible_to_user=True)
-            
-            # Redirect back to admin user list
-            return HttpResponse(f'''
-                <script>
-                    alert("کاربر {user.email} با نقش {role.name} فعال شد.");
-                    window.location.href = "/admin/accounts/user/";
-                </script>
-            ''')
+            ActivityLog.objects.create(user=user, action=_("Activated as {role_name}").format(role_name=role.name), is_visible_to_user=True)
+            return HttpResponse(f'<script>alert("{_("User {email} Activated").format(email=user.email)}"); window.location.href="/";</script>')
         except Exception as e:
-            return HttpResponse(f"Error: {e}", status=400)
+            return HttpResponse(f"{_('Error')}: {e}", status=400)
             
-    try:
-        user = User.objects.get(id=user_id)
-        roles = Role.objects.all()
-        
-        html = f'''
-        <html dir="rtl"><body style="font-family:Tahoma; padding:20px;">
-        <h3>تایید کاربر: {user.email}</h3>
-        <form method="post">
-            <input type="hidden" name="csrfmiddlewaretoken" value="{request.COOKIES.get('csrftoken', '')}">
-            <label>انتخاب نقش (Role):</label>
-            <select name="role_id" required>
-                <option value="">-- انتخاب کنید --</option>
-                {"".join([f'<option value="{r.id}">{r.name}</option>' for r in roles])}
-            </select><br><br>
-            <button type="submit">تایید و فعال‌سازی</button>
-        </form>
-        </body></html>
-        '''
-        return HttpResponse(html)
-    except User.DoesNotExist:
-        return HttpResponse("User not found.", status=404)
+    roles = Role.objects.all()
+    role_options = "".join([f'<option value="{r.id}">{r.name}</option>' for r in roles])
+    html = f'''
+    <html><body>
+    <h3>{_('Approve')}: {user.email}</h3>
+    <form method="post">
+        <input type="hidden" name="csrfmiddlewaretoken" value="{request.COOKIES.get('csrftoken', '')}">
+        <select name="role_id" required>{role_options}</select>
+        <button type="submit">{_('Activate')}</button>
+    </form>
+    </body></html>
+    '''
+    return HttpResponse(html)
 
+@login_required
 def reject_user_view(request, user_id):
     if not request.user.is_superuser:
-        return HttpResponse("Unauthorized.", status=403)
+        return HttpResponse(_("Forbidden"), status=403)
         
     try:
         user = User.objects.get(id=user_id)
         if not user.is_active:
-            user_email = user.email
+            email = user.email
             user.delete()
-            # Send rejection email to user
-            send_mail(
-                'رد درخواست عضویت',
-                'درخواست عضویت شما رد شد. لطفا دوباره تلاش کنید.',
-                settings.DEFAULT_FROM_EMAIL,
-                [user_email],
-                fail_silently=False,
-            )
-            return HttpResponse(f"کاربر {user_email} رد و حذف شد.")
-        return HttpResponse("این کاربر قبلا فعال شده است.", status=400)
+            return HttpResponse(f'<script>alert("{_("User {email} rejected and deleted.").format(email=email)}"); window.location.href="/";</script>')
+        return HttpResponse(_("User already active"), status=400)
     except User.DoesNotExist:
-        return HttpResponse("User not found.", status=404)
+        return HttpResponse(_("Not found"), status=404)

@@ -1,0 +1,141 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block extra_css %}
+<style>
+    .container { padding: 2rem; }
+    .floor-section { display: grid; grid-template-columns: 40px 1fr; gap: 1rem; margin-bottom: 1.5rem; align-items: stretch; width: 100%; }
+    
+    .vertical-header { 
+        writing-mode: vertical-rl; transform: rotate(180deg); 
+        background: var(--accent-1); color: white; padding: 0 0.4rem; 
+        border-radius: 6px; font-weight: bold; font-size: 0.8rem; text-align: center;
+        display: flex; align-items: center; justify-content: center; min-width: 35px; align-self: stretch;
+    }
+    [dir="rtl"] .vertical-header { left: auto; right: 0; transform: none; }
+
+    .room-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); 
+        gap: 15px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+    
+    .room-card { 
+        background: var(--card-bg); border-radius: 12px; padding: 1rem; 
+        box-shadow: 0 4px 15px rgba(0,0,0,0.08); border: 1px solid rgba(128,128,128,0.2); 
+        cursor: pointer; transition: 0.3s; position: relative; min-height: 140px;
+        display: flex; flex-direction: column; justify-content: space-between;
+        overflow: hidden;
+    }
+    .room-card:hover { transform: translateY(-5px); box-shadow: 0 10px 25px rgba(0,0,0,0.12); }
+    
+    /* Status Colors (No Blinking) */
+    .status-clean-occ { background: #10b981 !important; color: white; }
+    .status-dirty-occ { background: #78350f !important; color: white; }
+    .status-checkout { background: #60a5fa !important; color: white; }
+    .status-checkin { background: #facc15 !important; color: #854d0e; }
+    .status-both { background: #ef4444 !important; color: white; }
+    
+    .status-line { font-size: 0.75rem; font-weight: bold; margin-top: 3px; display: block; }
+    .label-black { color: #000; }
+    .label-red { color: #ef4444; background: white; padding: 2px 6px; border-radius: 4px; display: inline-block; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .label-green { color: #10b981; background: white; padding: 2px 6px; border-radius: 4px; display: inline-block; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+    .room-number { font-size: 1.4rem; font-weight: bold; }
+    .warehouse-badge { position: absolute; bottom: 10px; right: 10px; font-size: 1.2rem; }
+
+    .modal-glossary { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 10000; }
+    .modal-content { background: var(--card-bg); padding: 2rem; border-radius: 20px; width: 400px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); }
+    .glossary-item { display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; font-size: 0.9rem; }
+    .g-color { width: 24px; height: 24px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.1); flex-shrink: 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+    <div class="container">
+        {% regroup rooms by room.floor as floor_list %}
+        {% for floor in floor_list %}
+            <div class="floor-section">
+                <div class="vertical-header">FL {{ floor.grouper }}</div>
+                <div class="room-grid">
+                    {% for item in floor.list %}
+                        <div class="room-card 
+                            {% if item.is_checkout_today and item.is_checkin_today %}status-both
+                            {% elif item.is_checkout_today %}status-checkout
+                            {% elif item.is_checkin_today %}status-checkin
+                            {% elif item.is_occupied %}
+                                {% if item.room.is_clean %}status-clean-occ{% else %}status-dirty-occ{% endif %}
+                            {% endif %}"
+                            onclick="window.location.href='{% url 'housekeeping_detail' item.room.id %}'">
+                            
+                            <div class="room-number">#{{ item.room.number }}</div>
+                            
+                            <div style="margin-top: 10px;">
+                                <!-- Line 1: Occupied/Vacant -->
+                                <div class="status-line label-black">
+                                    {% if item.is_occupied %}{{ t.occupied }}{% else %}{{ t.vacant }}{% endif %}
+                                </div>
+                                
+                                <!-- Line 2: Check-in/Out Event -->
+                                <div class="status-line">
+                                    {% if item.is_checkout_today and item.is_checkin_today %}
+                                        <span class="label-red">📤📥 {{ t.turnover }}</span>
+                                    {% elif item.is_checkout_today %}
+                                        <span class="label-green">📤 {{ t.check_out }}</span>
+                                    {% elif item.is_checkin_today %}
+                                        <span class="label-red">📥 {{ t.check_in }}</span>
+                                    {% else %}
+                                        <span style="opacity: 0.5;">-</span>
+                                    {% endif %}
+                                </div>
+
+                                <!-- Line 3: Dirty/Clean -->
+                                <div class="status-line">
+                                    {% if item.room.status == 'DIRTY' %}
+                                        <span class="label-red">🧹 {{ t.dirty }}</span>
+                                    {% else %}
+                                        <span class="label-green">✨ {{ t.clean }}</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+
+                            {% if item.room.needs_inventory %}
+                                <div class="warehouse-badge" title="{% trans "Warehouse Restock" %}">📦</div>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+
+    <!-- Glossary Modal (Triggered by Global Help Button) -->
+    <div id="glossaryModal" class="modal-glossary" onclick="if(event.target == this) toggleGlossary()">
+        <div class="modal-content">
+            <h3 style="margin-top: 0; color: var(--accent-1); border-bottom: 1px solid rgba(128,128,128,0.1); padding-bottom: 10px;">📖 {% trans "Housekeeping Glossary" %}</h3>
+            <div class="glossary-item">
+                <div class="g-color" style="background: #10b981;"></div>
+                <span><strong>🛏️ {% trans "Clean Occupied" %}:</strong> {% trans "Staying and clean." %}</span>
+            </div>
+            <div class="glossary-item">
+                <div class="g-color" style="background: #78350f;"></div>
+                <span><strong>🛏️ {% trans "Dirty Occupied" %}:</strong> {% trans "Staying and needs cleaning." %}</span>
+            </div>
+            <div class="glossary-item">
+                <div class="g-color" style="background: #60a5fa;"></div>
+                <span><strong>📤 {% trans "Checkout Today" %}:</strong> {% trans "Leaving today." %}</span>
+            </div>
+            <div class="glossary-item">
+                <div class="g-color" style="background: #facc15;"></div>
+                <span><strong>📥 {% trans "Checkin Today" %}:</strong> {% trans "Arriving today." %}</span>
+            </div>
+            <div class="glossary-item">
+                <div class="g-color" style="background: #ef4444;"></div>
+                <span><strong>📤📥 {% trans "Turnover" %}:</strong> {% trans "Both leaving and arriving today." %}</span>
+            </div>
+            <button onclick="toggleGlossary()" style="width: 100%; padding: 12px; background: var(--accent-1); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; margin-top: 1rem;">{% trans "Close" %}</button>
+        </div>
+    </div>
+{% endblock %}

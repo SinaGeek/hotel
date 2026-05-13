@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Housekeeping" %} #{{ room.number }}{% endblock %}
+{% block page_title %}{% trans "Housekeeping Detail" %}{% endblock %}
+
+{% block extra_css %}
+    .detail-container { max-width: 95%; margin: 0 auto; padding: 1.5rem; }
+    .main-grid { display: grid; grid-template-columns: 400px 1fr; gap: 1.5rem; align-items: start; }
+    .box { background: var(--card-bg); padding: 1.5rem; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border: 1px solid rgba(128,128,128,0.1); margin-bottom: 1.5rem; }
+    .box h3 { margin-top: 0; color: var(--accent-1); border-bottom: 1px solid rgba(128,128,128,0.1); padding-bottom: 10px; margin-bottom: 1rem; }
+    
+    .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; margin-bottom: 1rem; }
+    .badge-clean { background: #10b981; color: white; }
+    .badge-dirty { background: #78350f; color: white; }
+    
+    .item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+    .item-card { background: rgba(128,128,128,0.05); padding: 1rem; border-radius: 12px; border: 1px solid rgba(128,128,128,0.1); }
+    
+    .qty-ctrl { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+    .qty-input { width: 60px; padding: 6px; border-radius: 6px; border: 1px solid #ddd; text-align: center; }
+    
+    .btn-save { background: var(--accent-1); color: white; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s; }
+    .btn-save:hover { filter: brightness(1.1); }
+{% endblock %}
+
+{% block content %}
+    <div class="detail-container">
+        <div style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 1rem;">
+            <a href="{% url 'housekeeping_overview' %}" class="btn-action" style="text-decoration: none; width: auto; background: var(--accent-1); color: white;">← {% trans "Back to Overview" %}</a>
+            <h1 style="margin:0;">{% trans "Room" %} #{{ room.number }}</h1>
+        </div>
+
+        <div class="main-grid">
+            <!-- Left Side: Status & Guest Info -->
+            <div class="side-col">
+                <div class="box">
+                    <h3>🛡️ {% trans "Room Status" %}</h3>
+                    <div class="status-badge {% if room.is_clean %}badge-clean{% else %}badge-dirty{% endif %}">
+                        {% if room.is_clean %}✨ {% trans "Clean" %}{% else %}🧹 {% trans "Dirty" %}{% endif %}
+                    </div>
+                    
+                    <div style="margin-bottom: 1rem; font-size: 0.85rem; color: var(--text-muted);">
+                        <div>{% trans "Last Cleaned:" %} {{ room.last_cleaned|date:"Y-m-d H:i"|default:"-" }}</div>
+                        <div>{% trans "Last Restocked:" %} {{ room.last_restocked|date:"Y-m-d H:i"|default:"-" }}</div>
+                    </div>
+
+                    {% if not room.is_clean %}
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="mark_cleaned">
+                        <button type="submit" class="btn-save" style="background: #10b981; margin-bottom: 10px;">✨ {% trans "Room is Cleaned" %}</button>
+                    </form>
+                    {% endif %}
+
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="update_status">
+                        <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: rgba(239, 68, 68, 0.05); border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.1);">
+                            <span>🛠️ {% trans "Needs Maintenance" %}</span>
+                            <input type="checkbox" name="needs_maintenance" {% if room.needs_maintenance %}checked{% endif %} onchange="this.form.submit()" style="width: 20px; height: 20px; cursor: pointer;">
+                        </div>
+                    </form>
+                </div>
+
+                <div class="box">
+                    <h3>👥 {% trans "Current Guest" %}</h3>
+                    {% if reservation %}
+                        <div style="font-weight: bold; font-size: 1.1rem;">{{ reservation.guest.first_name }} {{ reservation.guest.last_name }}</div>
+                        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 5px;">
+                            <div>📞 {{ reservation.guest.phone|default:"-" }}</div>
+                            <div>🕒 {% trans "Stay Until:" %} {{ reservation.check_out_date }}</div>
+                        </div>
+                        <a href="{% url 'guest_detail' reservation.guest.id %}" style="display: block; margin-top: 1rem; color: var(--accent-1); text-decoration: none; font-size: 0.85rem;">👤 {% trans "Open Profile" %}</a>
+                    {% else %}
+                        <div style="color: var(--text-muted);">{% trans "Room is Vacant" %}</div>
+                    {% endif %}
+                </div>
+
+                <div class="box">
+                    <h3>🎒 {% trans "Lost & Found" %}</h3>
+                    <form method="post" enctype="multipart/form-data">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="add_lost_found">
+                        <input type="text" name="item_name" placeholder="{% trans "Item Name" %}" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 10px;" required>
+                        <textarea name="description" placeholder="{% trans "Description" %}" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 10px;"></textarea>
+                        <input type="file" name="photo" style="margin-bottom: 10px; font-size: 0.8rem;">
+                        <button type="submit" class="btn-save" style="background: #64748b;">{% trans "Report Item" %}</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Right Side: Consumables Inventory -->
+            <div class="main-col">
+                <div class="box">
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="restock">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                            <h3 style="margin: 0; border: none;">📦 {% trans "Warehouse Stock Tracking" %}</h3>
+                            <button type="submit" class="btn-save" style="width: auto;">💾 {% trans "Save All Restocked Items" %}</button>
+                        </div>
+                        
+                        <div class="item-grid">
+                            {% for item in consumables %}
+                                <div class="item-card">
+                                    <div style="font-weight: bold;">{{ item.name }}</div>
+                                    <div style="font-size: 0.75rem; color: #10b981; margin-bottom: 10px;">{% trans "In Stock:" %} {{ item.quantity }} {{ item.unit }}</div>
+                                    <div class="qty-ctrl">
+                                        <input type="checkbox" name="item_ids" value="{{ item.id }}" id="check_{{ item.id }}" style="width: 18px; height: 18px;">
+                                        <label for="check_{{ item.id }}" style="font-size: 0.8rem;">{% trans "Restock" %}:</label>
+                                        <input type="number" name="qty_{{ item.id }}" value="0" min="0" step="0.01" class="qty-input" onchange="document.getElementById('check_{{ item.id }}').checked = (this.value > 0)">
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </form>
+                </div>
+
+                <!-- History Section -->
+                <div class="box">
+                    <h3>📜 {% trans "Recent History" %}</h3>
+                    <div style="max-height: 300px; overflow-y: auto;">
+                        <table class="excel-table">
+                            <thead>
+                                <tr>
+                                    <th>{% trans "Date" %}</th>
+                                    <th>{% trans "Event" %}</th>
+                                    <th>{% trans "User" %}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in lost_items %}
+                                <tr>
+                                    <td>{{ item.found_at|date:"Y-m-d" }}</td>
+                                    <td>🎒 {% trans "Lost & Found:" %} {{ item.item_name }}</td>
+                                    <td>{{ item.found_by.username }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}

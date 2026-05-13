@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Guest List" %}{% endblock %}
+{% block page_title %}{% trans "Guests Archive" %}{% endblock %}
+
+{% block extra_css %}
+    .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+    .excel-table { width: 100%; border-collapse: collapse; background: var(--card-bg); border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+    .excel-table th { background: var(--accent-1); color: white; padding: 12px; text-align: left; font-size: 0.9rem; }
+    .excel-table td { padding: 12px; border-bottom: 1px solid rgba(128,128,128,0.1); font-size: 0.85rem; }
+    .excel-table tr:hover { background: rgba(59, 130, 246, 0.05); cursor: pointer; }
+    .btn-view { padding: 4px 10px; background: var(--accent-1); color: white; border-radius: 4px; text-decoration: none; font-size: 0.75rem; }
+{% endblock %}
+
+{% block content %}
+    <div class="container">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+            <h1 style="margin:0; font-size: 1.8rem;">{% trans "Guests Archive" %}</h1>
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="guest-search" placeholder="{% trans "Search name, ID, or phone..." %}" style="padding: 8px 15px; border-radius: 8px; border: 1px solid rgba(128,128,128,0.2); width: 300px;">
+            </div>
+        </div>
+
+        <table class="excel-table" id="guest-table">
+            <thead>
+                <tr>
+                    <th>{% trans "Guest Name" %}</th>
+                    <th>{% trans "ID / Passport" %}</th>
+                    <th>{% trans "Phone" %}</th>
+                    <th>{% trans "Total Stays" %}</th>
+                    <th>{% trans "Total Nights" %}</th>
+                    <th>{% trans "Total Spent" %} (TRY)</th>
+                    <th>{% trans "Actions" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in guests %}
+                <tr onclick="window.location='{% url 'guest_detail' item.guest.id %}'">
+                    <td><strong>{{ item.guest.first_name }} {{ item.guest.last_name }}</strong></td>
+                    <td>{{ item.guest.national_id|default:item.guest.passport_number }}</td>
+                    <td>{{ item.guest.phone }}</td>
+                    <td>{{ item.total_stays }}</td>
+                    <td>{{ item.total_nights }}</td>
+                    <td>{{ item.total_paid|floatformat:0 }}</td>
+                    <td>
+                        <a href="{% url 'guest_detail' item.guest.id %}" class="btn-view">{% trans "Open Profile" %}</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        document.getElementById('guest-search').addEventListener('input', function(e) {
+            const term = e.target.value.toLowerCase();
+            const rows = document.querySelectorAll('#guest-table tbody tr');
+            rows.forEach(row => {
+                const text = row.innerText.toLowerCase();
+                row.style.display = text.includes(term) ? '' : 'none';
+            });
+        });
+    </script>
+{% endblock %}

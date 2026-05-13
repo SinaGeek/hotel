@@ -2,8 +2,12 @@ from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from apps.rooms.models import Room
 from apps.guests.models import Guest
-from apps.reservations.models import Reservation
+from apps.reservations.models import Reservation, Transaction
 from apps.inventory.models import InventoryItem
+import datetime
+from django.db.models import Sum
+from django.contrib.auth import get_user_model
+User = get_user_model()
 
 from apps.rooms.models import Room, Table, RoomType
 
@@ -39,12 +43,34 @@ def dashboard_view(request):
     
     room_stats = []
     for rt in room_types:
+        rt_rooms = rooms.filter(room_type=rt)
+        vacant = rt_rooms.filter(status__in=['CLEAN', 'DIRTY', 'VACANT']).count()
+        reserved = rt_rooms.filter(status='RESERVED').count()
+        total = rt_rooms.count()
         room_stats.append({
+            'id': rt.id,
             'name': rt.name,
-            'total': rooms.filter(room_type=rt).count(),
-            'occupied': rooms.filter(room_type=rt, status='OCCUPIED').count()
+            'total': total,
+            'vacant': vacant,
+            'reserved': reserved,
+            'display': f"{vacant} / {reserved} / {total}"
         })
 
+    # Financial Stats
+    today = datetime.date.today()
+    today_revenue = Transaction.objects.filter(date=today).aggregate(total=Sum('amount_ref'))['total'] or 0
+    
+    # Simple pending calculation
+    pending_data = Reservation.objects.filter(is_paid=False).aggregate(
+        total=Sum('total_amount'), 
+        paid=Sum('paid_amount')
+    )
+    total_pending = (pending_data['total'] or 0) - (pending_data['paid'] or 0)
+
+    context['financials'] = {
+        'today_revenue': today_revenue,
+        'total_pending': total_pending,
+    }
     context['room_stats_list'] = room_stats
     context['room_clean_stats'] = {
         'clean': rooms.filter(is_clean=True).count(),
@@ -62,6 +88,9 @@ def dashboard_view(request):
     
     # Low stock alerts (max 3)
     context['low_stock'] = InventoryItem.objects.filter(quantity__lte=5)[:3]
+    
+    if user.is_authenticated and user.is_superuser:
+        context['pending_users'] = User.objects.filter(is_active=False)
 
     return render(request, 'dashboard.html', context)
 

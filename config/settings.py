@@ -19,7 +19,8 @@ MIDDLEWARE = [
     'django.middleware.locale.LocaleMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware','django.contrib.auth.middleware.AuthenticationMiddleware','django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware','apps.core.middleware.HotelContextMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    #'apps.core.middleware.HotelContextMiddleware',
 ]
 ROOT_URLCONF = 'config.urls'
 TEMPLATES = [{
@@ -47,6 +48,8 @@ LANGUAGES = (('en', 'English'), ('tr', 'Turkish'), ('fa', 'Persian'))
 LOCALE_PATHS = [BASE_DIR / 'locale']
 STATIC_URL='static/'
 DEFAULT_AUTO_FIELD='django.db.models.BigAutoField'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 EMAIL_BACKEND = 'django.core.mail.backends.filebased.EmailBackend'
 EMAIL_FILE_PATH = BASE_DIR / 'emails'
@@ -64,3 +67,6 @@ SPECTACULAR_SETTINGS = {'TITLE': 'Hotel PMS API', 'VERSION': '1.0.0'}
 
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://redis:6379/0')
 CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/1')
+LOGIN_URL = 'login'
+LOGIN_REDIRECT_URL = 'dashboard'
+LOGOUT_REDIRECT_URL = 'login'

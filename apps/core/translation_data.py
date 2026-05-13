@@ -270,6 +270,36 @@ TRANSLATIONS = {
         'fa': 'رزرو',
         'tr': 'Rez',
     },
+    'reserved': {
+        'en': 'Reserved',
+        'fa': 'رزرو شده',
+        'tr': 'Rezerve',
+    },
+    'clean_vacant': {
+        'en': 'Clean Vacant',
+        'fa': 'اتاق خالی تمیز',
+        'tr': 'Boş Temiz',
+    },
+    'dirty_vacant': {
+        'en': 'Dirty Vacant',
+        'fa': 'اتاق خالی کثیف',
+        'tr': 'Boş Kirli',
+    },
+    'occupied_paid': {
+        'en': 'Occupied Paid',
+        'fa': 'اتاق پر پرداخت شده',
+        'tr': 'Dolu Ödenmiş',
+    },
+    'color_legend': {
+        'en': 'Color Legend',
+        'fa': 'راهنمای رنگ‌ها',
+        'tr': 'Renk Rehberi',
+    },
+    'occupied_unpaid': {
+        'en': 'Occupied Unpaid',
+        'fa': 'اتاق پر با بدهی',
+        'tr': 'Dolu Borçlu',
+    },
     'guest': {
         'en': 'Guest',
         'fa': 'مهمان',
@@ -354,5 +384,15 @@ TRANSLATIONS = {
         'en': 'Expedia',
         'fa': 'اکسپدیا',
         'tr': 'Expedia',
-    }
+    },
+    'dashboard': {
+        'en': 'Dashboard',
+        'fa': 'پیشخوان',
+        'tr': 'Panel',
+    },
+    'today_revenue': {
+        'en': "Today's Revenue",
+        'fa': 'درآمد امروز',
+        'tr': 'Bugünkü Gelir',
+    },
 }

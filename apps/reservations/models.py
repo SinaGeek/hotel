@@ -17,6 +17,16 @@ class Reservation(HotelScopedModel):
     check_out_time=models.TimeField(null=True, blank=True)
     actual_check_in=models.DateTimeField(null=True, blank=True)
     actual_check_out=models.DateTimeField(null=True, blank=True)
+    
+    def save(self, *args, **kwargs):
+        # Auto-update is_paid flag
+        total = float(self.total_amount or 0)
+        paid = float(self.paid_amount or 0)
+        if total > 0:
+            self.is_paid = paid >= total
+        else:
+            self.is_paid = paid >= 0 # Handle complimentary if needed
+        super().save(*args, **kwargs)
 
 class ReservationGuest(HotelScopedModel):
     reservation=models.ForeignKey(Reservation, on_delete=models.CASCADE, related_name='guests')

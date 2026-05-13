@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{{ guest.first_name }} {{ guest.last_name }} - {% trans "Guest Profile" %}{% endblock %}
+
+{% block extra_css %}
+    .container { max-width: 1100px; margin: 0 auto; padding: 2rem; }
+    .profile-grid { display: grid; grid-template-columns: 350px 1fr; gap: 2rem; align-items: start; }
+    .box { background: var(--card-bg); padding: 1.5rem; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); border: 1px solid rgba(128,128,128,0.1); }
+    .id-photo-wrapper { width: 100%; aspect-ratio: 16/10; background: #f1f5f9; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 2px dashed rgba(128,128,128,0.2); position: relative; }
+    .id-photo-wrapper img { width: 100%; height: 100%; object-fit: contain; }
+    .upload-overlay { position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0,0,0,0.5); color: white; text-align: center; padding: 8px; font-size: 0.8rem; cursor: pointer; transition: 0.3s; opacity: 0; }
+    .id-photo-wrapper:hover .upload-overlay { opacity: 1; }
+    .field-group { margin-bottom: 1rem; }
+    .field-group label { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; }
+    .field-group input, .field-group textarea { width: 100%; padding: 8px 12px; border: 1px solid rgba(128,128,128,0.2); border-radius: 8px; font-size: 0.9rem; font-family: inherit; }
+    .history-card { background: rgba(128,128,128,0.05); padding: 1rem; border-radius: 12px; margin-bottom: 1rem; border: 1px solid rgba(128,128,128,0.1); }
+    .history-card h4 { margin: 0 0 8px 0; font-size: 1rem; color: var(--accent-1); }
+    .companion-tag { display: inline-block; padding: 2px 8px; background: rgba(59, 130, 246, 0.1); border-radius: 4px; font-size: 0.75rem; margin-right: 5px; margin-top: 5px; }
+{% endblock %}
+
+{% block content %}
+    <div class="container">
+        <div style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 1rem;">
+            <a href="{% url 'guest_list' %}" style="text-decoration: none; color: var(--text-muted);">← {% trans "Archive" %}</a>
+            <h1 style="margin:0;">{{ guest.first_name }} {{ guest.last_name }}</h1>
+        </div>
+
+        <div class="profile-grid">
+            <!-- Sidebar: Identity & Photo -->
+            <div class="box">
+                <form method="post" enctype="multipart/form-data" id="photo-form">
+                    {% csrf_token %}
+                    <div class="id-photo-wrapper" onclick="document.getElementById('id_photo_input').click()">
+                        {% if guest.id_photo %}
+                            <img src="{{ guest.id_photo.url }}" alt="ID Photo">
+                        {% else %}
+                            <div style="text-align: center; color: var(--text-muted);">
+                                <span style="font-size: 2rem;">📷</span><br>
+                                {% trans "No ID Photo" %}
+                            </div>
+                        {% endif %}
+                        <div class="upload-overlay">{% trans "Upload New Scan" %}</div>
+                    </div>
+                    <input type="file" name="id_photo" id="id_photo_input" style="display: none;" onchange="document.getElementById('photo-form').submit()">
+                </form>
+
+                <div style="margin-top: 1.5rem;">
+                    <form method="post">
+                        {% csrf_token %}
+                        <div class="field-group">
+                            <label>{% trans "First Name" %}</label>
+                            <input type="text" name="first_name" value="{{ guest.first_name }}">
+                        </div>
+                        <div class="field-group">
+                            <label>{% trans "Last Name" %}</label>
+                            <input type="text" name="last_name" value="{{ guest.last_name }}">
+                        </div>
+                        <div class="field-group">
+                            <label>{% trans "National ID" %}</label>
+                            <input type="text" name="national_id" value="{{ guest.national_id }}">
+                        </div>
+                        <div class="field-group">
+                            <label>{% trans "Passport Number" %}</label>
+                            <input type="text" name="passport_number" value="{{ guest.passport_number }}">
+                        </div>
+                        <div class="field-group">
+                            <label>{% trans "Phone" %}</label>
+                            <input type="text" name="phone" value="{{ guest.phone }}">
+                        </div>
+                        <div class="field-group">
+                            <label>{% trans "Email" %}</label>
+                            <input type="email" name="email" value="{{ guest.email }}">
+                        </div>
+                        <div class="field-group">
+                            <label>{% trans "Notes" %}</label>
+                            <textarea name="notes" rows="3">{{ guest.notes }}</textarea>
+                        </div>
+                        <button type="submit" class="btn-action btn-save" style="width: 100%; background: var(--accent-1); color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer;">{% trans "Save Changes" %}</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Main: Stay History -->
+            <div class="box">
+                <h3 style="margin-top:0;">{% trans "Stay History" %}</h3>
+                
+                {% for item in history %}
+                    <div class="history-card">
+                        <div style="display: flex; justify-content: space-between;">
+                            <h4>{% trans "Room" %} #{{ item.reservation.room.number }} - {{ item.reservation.room.room_type.name }}</h4>
+                            <span style="font-size: 0.8rem; color: var(--text-muted);">{{ item.reservation.check_in_date }} → {{ item.reservation.check_out_date }}</span>
+                        </div>
+                        <div style="font-size: 0.85rem; margin-bottom: 10px;">
+                            <strong>{% trans "Role" %}:</strong> {% if item.is_primary %}{% trans "Primary Guest" %}{% else %}{% trans "Companion" %}{% endif %} | 
+                            <strong>{% trans "Paid" %}:</strong> {{ item.reservation.paid_amount|floatformat:0 }} TRY
+                        </div>
+                        
+                        {% if item.companions %}
+                        <div style="font-size: 0.8rem;">
+                            <strong>{% trans "Stayed with" %}:</strong><br>
+                            {% for comp in item.companions %}
+                                <a href="{% url 'guest_detail' comp.guest.id %}" class="companion-tag" style="text-decoration:none; color:inherit;">
+                                    {{ comp.guest.first_name }} {{ comp.guest.last_name }}
+                                </a>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                {% empty %}
+                    <p style="text-align: center; color: var(--text-muted); padding: 2rem;">{% trans "No past reservations found." %}</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+{% endblock %}

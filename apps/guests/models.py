@@ -10,6 +10,8 @@ class Guest(HotelScopedModel, SoftDeleteModel):
     tc_kimlik_no=models.CharField(max_length=11, blank=True, null=True)
     passport_number=models.CharField(max_length=50, blank=True, null=True)
     nationality=models.CharField(max_length=50, default='TR')
+    id_photo = models.ImageField(upload_to='guests/id_photos/', null=True, blank=True)
+    notes = models.TextField(blank=True)
 
     def save(self, *args, **kwargs):
         if not self.guest_number:

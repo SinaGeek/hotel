@@ -11,21 +11,74 @@
         input { width: 100%; padding: 0.75rem; margin-bottom: 1rem; border-radius: 6px; border: 1px solid #64748b; background: #1e293b; color: white; box-sizing: border-box; }
         .btn { background: #3b82f6; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; }
         .btn:hover { background: #2563eb; }
-        .error { color: #ef4444; margin-bottom: 1rem; }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>{% trans "Login" %}</h2>
-        {% if error %}<p class="error">{{ error }}</p>{% endif %}
-        <form method="post">
+        <h2 id="form-title">{% trans "Enter your email" %}</h2>
+        {% if error %}<p style="color: #ef4444;">{{ error }}</p>{% endif %}
+        <form method="post" id="auth-form" action="{% url 'login' %}">
             {% csrf_token %}
-            <input type="email" name="email" placeholder="{% trans 'Email' %}" required>
-            <input type="password" name="password" placeholder="{% trans 'Password' %}" required>
-            <button type="submit" class="btn">{% trans "Login / Continue" %}</button>
+            <input type="email" id="email-input" name="email" placeholder="{% trans 'Email' %}" value="{{ initial_email }}" required>
+            
+            <div id="password-field" class="hidden">
+                <input type="password" id="password-input" name="password" placeholder="{% trans 'Password' %}">
+            </div>
+            
+            <div id="register-fields" class="hidden">
+                <input type="text" name="first_name" placeholder="{% trans 'First Name' %}">
+                <input type="text" name="last_name" placeholder="{% trans 'Last Name' %}">
+            </div>
+            
+            <button type="submit" id="submit-btn" class="btn">{% trans "Continue" %}</button>
         </form>
-        <hr style="margin: 1.5rem 0; opacity: 0.2;">
-        <a href="/admin/" style="color: #94a3b8; text-decoration: none; font-size: 0.9rem;">ورود به پنل مدیریت (مخصوص مدیران)</a>
     </div>
+
+<script>
+    const authForm = document.getElementById('auth-form');
+    const emailInput = document.getElementById('email-input');
+    const passwordField = document.getElementById('password-field');
+    const passwordInput = document.getElementById('password-input');
+    const registerFields = document.getElementById('register-fields');
+    const submitBtn = document.getElementById('submit-btn');
+    const formTitle = document.getElementById('form-title');
+
+    let stage = {% if error or initial_email %}2{% else %}1{% endif %};
+    
+    if (stage === 2) {
+        passwordField.classList.remove('hidden');
+        passwordInput.required = true;
+        formTitle.innerText = "{% trans 'Login' %}";
+        submitBtn.innerText = "{% trans 'Login' %}";
+    }
+
+    authForm.addEventListener('submit', function(e) {
+        if (stage === 1) {
+            e.preventDefault(); 
+            const email = emailInput.value;
+
+            fetch(`?check_email=${email}`)
+                .then(response => response.json())
+                .then(data => {
+                    stage = 2;
+                    passwordField.classList.remove('hidden');
+                    passwordInput.required = true;
+                    emailInput.readOnly = true; 
+
+                    if (data.exists) {
+                        formTitle.innerText = "{% trans 'Login' %}";
+                        submitBtn.innerText = "{% trans 'Login' %}";
+                    } else {
+                        registerFields.classList.remove('hidden');
+                        formTitle.innerText = "{% trans 'Create an Account' %}";
+                        submitBtn.innerText = "{% trans 'Register' %}";
+                        registerFields.querySelectorAll('input').forEach(i => i.required = true);
+                        authForm.action = "{% url 'register' %}";
+                    }
+                });
+        }
+    });
+</script>
 </body>
 </html>

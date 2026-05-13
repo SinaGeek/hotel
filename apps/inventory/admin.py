@@ -3,7 +3,7 @@ from .models import InventoryItem, InventoryTransaction
 
 @admin.register(InventoryItem)
 class InventoryItemAdmin(admin.ModelAdmin):
-    list_display = ('name', 'sku', 'quantity', 'unit', 'price')
+    list_display = ('name', 'sku', 'quantity', 'unit', 'last_buy_price', 'selling_price', 'expiration_date')
     search_fields = ('name', 'sku')
 
 @admin.register(InventoryTransaction)
