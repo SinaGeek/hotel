@@ -1,0 +1,6 @@
+body.auth-page{font-family:'Vazirmatn',sans-serif;background:#0f172a;color:#fff;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
+.card{background:rgba(30,41,59,.9);padding:2rem;border-radius:12px;border:1px solid rgba(255,255,255,.1);width:100%;max-width:400px;text-align:center}
+.card.wide{max-width:500px}
+input{width:100%;padding:.75rem;margin-bottom:1rem;border-radius:6px;border:1px solid #64748b;background:#1e293b;color:white;box-sizing:border-box}
+.btn{background:#3b82f6;color:white;padding:.75rem 1.5rem;border:none;border-radius:6px;cursor:pointer;width:100%;font-weight:bold}.btn:hover{background:#2563eb}
+.hidden{display:none}.text-error{color:#ef4444}
