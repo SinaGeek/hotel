@@ -2,7 +2,15 @@ from django.db import models
 from apps.core.models import HotelScopedModel
 from django.utils import timezone
 
+class InventoryCategory(HotelScopedModel):
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    # You can add permissions fields here if needed
+    def __str__(self):
+        return self.name
+
 class InventoryItem(HotelScopedModel):
+    # category foreign key defined later with null=True, blank=True
     name = models.CharField(max_length=120)
     sku = models.CharField(max_length=50, unique=True)
     image = models.ImageField(upload_to='inventory/items/', null=True, blank=True)
@@ -17,7 +25,6 @@ class InventoryItem(HotelScopedModel):
     # For dynamic columns
     custom_data = models.JSONField(default=dict, blank=True)
     
-    updated_at = models.DateTimeField(auto_now=True)
     
     def save(self, *args, **kwargs):
         if not self.sku:

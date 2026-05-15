@@ -1,6 +1,6 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
-from .models import InventoryItem, InventoryTransaction, InventoryColumn
+from .models import InventoryItem, InventoryTransaction, InventoryColumn, InventoryCategory
 from django.db.models import F
 
 @login_required

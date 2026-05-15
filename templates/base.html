@@ -99,19 +99,8 @@
         }
         .lang-content form button:hover { background: var(--accent-1); color: white; }
 
-        .floating-legend {
-            position: fixed; bottom: 2rem; z-index: 10000;
-            background: rgba(255,255,255,0.72); padding: 0.8rem; border-radius: 12px;
-            backdrop-filter: blur(12px); box-shadow: 0 4px 20px rgba(0,0,0,0.12); display: none;
-            flex-direction: column; gap: 0.8rem; font-size: 0.75rem;
-            border: 1px solid rgba(128,128,128,0.12); cursor: pointer;
-        }
-        [dir="rtl"] .floating-legend { left: 1rem; } [dir="ltr"] .floating-legend { right: 1rem; }
-        .floating-legend.show { display: flex; }
-        .f-item { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-        .legend-small-view { flex-direction: column; align-items: flex-start; gap: 0.6rem; }
-        .legend-small-view .f-item { flex-direction: row; align-items: center; }
-        .f-color { width: 15px; height: 15px; border-radius: 3px; }
+
+
 
         {% block extra_css %}{% endblock %}
     </style>
@@ -199,22 +188,7 @@
         });
     </script>
 
-    <div class="floating-legend" id="global-legend">
-        <!-- Default (Large View) Legend Items -->
-        <div class="legend-large-view">
-            <div class="f-item"><div class="f-color" style="background:#94a3b8"></div> <span>{{ t.clean_vacant }}</span></div>
-            <div class="f-item"><div class="f-color" style="background:#78350f"></div> <span>{{ t.dirty_vacant }}</span></div>
-            <div class="f-item"><div class="f-color" style="background:#f59e0b"></div> <span>{{ t.reserved }}</span></div>
-            <div class="f-item"><div class="f-color" style="background:#10b981"></div> <span>{{ t.occupied_paid }}</span></div>
-            <div class="f-item"><div class="f-color" style="background:#ef4444"></div> <span>{{ t.occupied_unpaid }}</span></div>
-        </div>
-        <!-- Small View Legend Items -->
-        <div class="legend-small-view">
-            <div class="f-item"><div class="f-color" style="background:#10b981"></div> <span>{{ t.sold }}</span></div>
-            <div class="f-item"><div class="f-color" style="background:#f59e0b"></div> <span>{{ t.reserved }}</span></div>
-            <div class="f-item"><div class="f-color" style="background:#94a3b8"></div> <span>{{ t.vacant }}</span></div>
-        </div>
-    </div>
+
     {% block content %}{% endblock %}
 
     <script>
@@ -242,25 +216,7 @@
             if (adminBar) adminBar.style.display = document.body.classList.contains('edit-mode') ? 'flex' : 'none';
         }
 
-        function toggleGlobalLegend() {
-            const legend = document.getElementById('global-legend');
-            if (!legend) return;
-            legend.classList.toggle('show');
-            localStorage.setItem('hotel_legend_visible', legend.classList.contains('show') ? '1' : '0');
-        }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            const legend = document.getElementById('global-legend');
-            if (legend && localStorage.getItem('hotel_legend_visible') === '1') {
-                legend.classList.add('show');
-            }
-            if (legend) {
-                legend.addEventListener('click', () => {
-                    legend.classList.remove('show');
-                    localStorage.setItem('hotel_legend_visible', '0');
-                });
-            }
-        });
     </script>
     {% block extra_js %}{% endblock %}
 </body>
