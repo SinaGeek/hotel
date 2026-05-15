@@ -6,108 +6,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}{% trans "Hotel Management" %}{% endblock %}</title>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;700&display=swap" rel="stylesheet">
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'css/base.css' %}">
     <style>
-        :root {
-            --bg-color: #f1f5f9; /* Slate 100 - slightly darker than f8fafc */
-            --card-bg: rgba(255, 255, 255, 1.0); /* Solid white for better contrast */
-            --text-main: #0f172a;
-            --text-muted: #475569;
-            --accent-1: #3b82f6;
-        }
-        body.dark-mode {
-            --bg-color: #0f172a;
-            --card-bg: rgba(30, 41, 59, 0.8);
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-        }
-        body { 
-            margin: 0; padding: 0; font-family: 'Vazirmatn', sans-serif; 
-            background: var(--bg-color); color: var(--text-main); 
-            min-height: 100vh; transition: background 0.3s ease; 
-            padding-top: 80px; box-sizing: border-box;
-        }
-
-        input, select, textarea {
-            background: var(--card-bg);
-            color: var(--text-main);
-            border: 1px solid rgba(128,128,128,0.2);
-            border-radius: 6px;
-            padding: 8px;
-        }
-        input:focus, select:focus, textarea:focus {
-            outline: none;
-            border-color: var(--accent-1);
-        }
-
-        .btn-action { 
-            height: 36px; padding: 0 15px; border-radius: 8px; border: none; 
-            cursor: pointer; font-weight: bold; transition: 0.3s; 
-            display: inline-flex; align-items: center; justify-content: center; 
-            font-size: 0.85rem; text-decoration: none;
-        }
-        .btn-action:hover { opacity: 0.9; transform: translateY(-1px); }
-
-        .global-header {
-            position: fixed; top: 0; left: 0; width: 100%; height: 70px;
-            background: var(--card-bg); backdrop-filter: blur(15px);
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 0 2rem; box-sizing: border-box; z-index: 9800;
-            border-bottom: 1px solid rgba(128,128,128,0.1);
-        }
-
-        .user-menu { display: flex; align-items: center; gap: 1rem; position: relative; }
-        .user-dropdown { position: relative; display: inline-flex; align-items: center; }
-        .global-avatar { width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(45deg, #3b82f6, #10b981); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 0.9rem; cursor: pointer; }
-        .user-dropdown-content {
-            display: none; position: absolute; top: calc(100% + 8px);
-            {% if lang_meta.dir == 2 %}right: 0;{% else %}left: 0;{% endif %}
-            background: var(--card-bg); min-width: 200px; border-radius: 10px;
-            box-shadow: 0 8px 16px rgba(0,0,0,0.2); border: 1px solid rgba(128,128,128,0.15);
-            z-index: 10000; overflow: hidden;
-        }
-        .user-dropdown:hover .user-dropdown-content { display: block; }
-        .user-dropdown::after { content: ""; position: absolute; top: 100%; left: 0; width: 100%; height: 10px; }
-        .user-dropdown-item { display: block; padding: 10px 14px; color: var(--text-main); text-decoration: none; font-size: 0.9rem; }
-        .user-dropdown-item:hover { background: var(--accent-1); color: #fff; }
-        .user-dropdown-name { font-weight: 700; border-bottom: 1px solid rgba(128,128,128,0.15); cursor: default; }
-        .user-info { font-size: 0.85rem; }
-        .user-info .name { font-weight: bold; }
-        .user-info .role { color: var(--text-muted); font-size: 0.75rem; }
-
-        .page-title-center { position: absolute; left: 50%; transform: translateX(-50%); text-align: center; }
-        .actions-group { display: flex; gap: 0.8rem; align-items: center; }
-
-        .s-btn {
-            background: var(--card-bg); border: 1px solid rgba(128,128,128,0.2);
-            border-radius: 50%; width: 40px; height: 40px; display: flex;
-            align-items: center; justify-content: center; cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1); font-size: 1.1rem;
-        }
-
-        .lang-dropdown { position: relative; display: inline-block; }
-        .lang-content {
-            display: none; position: absolute; background: var(--card-bg);
-            min-width: 120px; box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-            border-radius: 8px; padding: 5px 0; z-index: 100; top: 100%;
-        }
-        .lang-dropdown:hover .lang-content { display: block; }
-        /* Add a small invisible bridge to prevent closing on gap */
-        .lang-dropdown::after { content: ""; position: absolute; top: 100%; left: 0; width: 100%; height: 10px; }
-        .lang-content form button {
-            width: 100%; padding: 10px 16px; border: none; background: none;
-            color: var(--text-main); text-align: inherit; cursor: pointer; font-family: inherit;
-        }
-        .lang-content form button:hover { background: var(--accent-1); color: white; }
-
-
-
-
         {% block extra_css %}{% endblock %}
-    </style>
-    <style>
-        .dark-mode-active body { --bg-color: #0f172a; --card-bg: rgba(30, 41, 59, 0.8); --text-main: #f8fafc; --text-muted: #94a3b8; }
-        body.dark-mode { --bg-color: #0f172a; --card-bg: rgba(30, 41, 59, 0.8); --text-main: #f8fafc; --text-muted: #94a3b8; }
-        @keyframes blink { 0%, 50% { background: #d2691e; } 51%, 100% { background: inherit; } }
     </style>
 </head>
 <body class="{% if request.session.theme == 'dark' %}dark-mode{% endif %}">
@@ -115,10 +17,10 @@
     <header class="global-header">
         <div class="user-menu">
             {% if user.is_authenticated %}
-            <a href="{% url 'dashboard' %}" class="s-btn" style="margin-right: 15px; text-decoration: none; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; font-size: 1.2rem;" title="{% trans "Dashboard" %}">🏠</a>
+            <a href="{% url 'dashboard' %}" class="s-btn home-btn" title="{% trans "Dashboard" %}">🏠</a>
             <div class="user-dropdown">
                 {% if user.avatar %}
-                    <img src="{{ user.avatar.url }}" class="global-avatar" style="object-fit: cover;">
+                    <img src="{{ user.avatar.url }}" class="global-avatar avatar-cover">
                 {% else %}
                     <div class="global-avatar">{{ user.username|first|upper }}</div>
                 {% endif %}
@@ -134,7 +36,7 @@
             </div>
         {% else %}
             <div class="user-menu-guest">
-                <a href="{% url 'login' %}" class="s-btn" style="width: auto; border-radius: 8px; padding: 0 20px; text-decoration: none; font-size: 0.9rem; display: flex; gap: 8px;">
+                <a href="{% url 'login' %}" class="s-btn login-btn">
                     👤 <span>{% trans "Login" %}</span>
                 </a>
             </div>
@@ -142,7 +44,7 @@
         </div>
 
         <div class="page-title-center">
-            <h1 style="margin:0; font-size: 1.1rem; font-weight: bold; background: linear-gradient(to right, #3b82f6, #10b981); -webkit-background-clip: text; -webkit-text-fill-color: transparent; white-space: nowrap;">
+            <h1 class="page-title">
                 {% block page_title %}{% endblock %}
             </h1>
         </div>
@@ -165,7 +67,7 @@
                     </form>
                 </div>
             </div>
-            <button id="global-help-btn" class="s-btn" onclick="toggleGlossary()" title="{% trans "Help" %}" style="display: none;">❓</button>
+            <button id="global-help-btn" class="s-btn help-hidden" onclick="toggleGlossary()" title="{% trans "Help" %}">❓</button>
             <button id="global-theme-toggle" class="s-btn" onclick="toggleGlobalTheme()">
                 {% if request.session.theme == 'dark' %}🌙{% else %}☀️{% endif %}
             </button>
