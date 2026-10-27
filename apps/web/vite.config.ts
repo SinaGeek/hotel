@@ -12,6 +12,13 @@ export default defineConfig({
       '/api': 'http://localhost:8080',
     },
   },
+  // preview (pnpm preview): serve the production build on 4173 with the same API proxy
+  preview: {
+    port: 4173,
+    proxy: {
+      '/api': 'http://localhost:8080',
+    },
+  },
   build: {
     outDir: 'dist',
     sourcemap: false,

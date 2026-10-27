@@ -259,7 +259,8 @@ async fn refresh(
         sub: auth.user_id,
         hotel_id: auth.hotel_id,
         role: auth.role.clone(),
-        fpc: false, // refresh only granted after password change handled
+        // keep the flag unchanged: refresh never clears a pending forced change
+        fpc: auth.force_password_change,
         exp: (chrono::Utc::now() + chrono::Duration::hours(24 * SESSION_DAYS)).timestamp(),
     };
     let token = encode_token(&state, &claims)?;

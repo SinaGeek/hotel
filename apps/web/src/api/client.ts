@@ -1,26 +1,42 @@
-// API client. Tomorrow these types come from src/types/generated (ts-rs / OpenAPI),
-// until then hand-written to match hms-core::api_types.
-import type { ApiResponse, LoginRequest } from '../types/generated/api'
+// API client for the hms-server REST API (README §12). Token persisted in
+// localStorage; types mirror the server DTOs in src/types/generated/api.ts
+// (hand-written until ts-rs/OpenAPI generation, see todo.md).
+import type {
+  ApiResponse,
+  BoardResponse,
+  ChannelDto,
+  CreateReservationBody,
+  FolioDto,
+  GuestDto,
+  HotelDto,
+  LoginResponse,
+  PaymentDto,
+  PriceRuleDto,
+  ReservationDto,
+  ReservationListQuery,
+  RoleMatrix,
+  RoomDto,
+  RoomTypeDto,
+  SessionUser,
+  UserDto,
+} from '../types/generated/api'
 
 const BASE = '/api/v1'
-
 const AUTH_KEY = 'hms.session'
 
-export interface SessionUser {
-  userId: string
-  hotelId: number
-  username: string
-  fullName: string
-  role: string
+export interface Session {
+  token: string
+  user: SessionUser
+  permissions: string[]
 }
 
-export function loadSession(): SessionUser | null {
+export function loadSession(): Session | null {
   const raw = localStorage.getItem(AUTH_KEY)
-  return raw ? (JSON.parse(raw) as SessionUser) : null
+  return raw ? (JSON.parse(raw) as Session) : null
 }
 
-export function saveSession(user: SessionUser) {
-  localStorage.setItem(AUTH_KEY, JSON.stringify(user))
+export function saveSession(s: Session) {
+  localStorage.setItem(AUTH_KEY, JSON.stringify(s))
 }
 
 export function clearSession() {
@@ -33,15 +49,27 @@ export class ApiError extends Error {
   }
 }
 
-type ReqInit = Omit<RequestInit, 'body'> & { body?: unknown; headers?: HeadersInit }
+type ReqInit = Omit<RequestInit, 'body'> & { body?: unknown; query?: Record<string, string | number | undefined> }
 
 async function request<T>(path: string, init?: ReqInit): Promise<T> {
-  const { body, ...rest } = init ?? {}
-  const res = await fetch(BASE + path, {
-    ...rest,
-    headers: { 'Content-Type': 'application/json', ...(rest.headers ?? {}) },
-    body: body != null ? JSON.stringify(body) : undefined,
+  const session = loadSession()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((init?.headers as Record<string, string>) ?? {}),
+  }
+  if (session) headers['Authorization'] = `Bearer ${session.token}`
+  const qs = init?.query
+    ? '?' + Object.entries(init.query).filter(([, v]) => v != null).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')
+    : ''
+  const res = await fetch(BASE + path + qs, {
+    ...init,
+    headers,
+    body: init?.body != null ? JSON.stringify(init.body) : undefined,
   })
+  if (res.status === 401) {
+    // expired/invalid session — drop it and force re-login (README §8)
+    clearSession()
+  }
   const payload: ApiResponse<T> = await res.json().catch(() => ({ success: false, data: null as T, error: `HTTP ${res.status}` }))
   if (!res.ok || !payload.success) {
     throw new ApiError(payload.error ?? `HTTP ${res.status}`, res.status)
@@ -49,7 +77,65 @@ async function request<T>(path: string, init?: ReqInit): Promise<T> {
   return payload.data
 }
 
+export function sessionHasPermission(session: Session | null, perm: string): boolean {
+  if (!session) return false
+  if (session.user.role === 'admin') return true
+  return session.permissions.includes(perm)
+}
+
 export const api = {
+  // ---------------------------------------------------------------- auth
   login: (hotelId: number, username: string, password: string) =>
-    request<SessionUser>('/auth/login', { method: 'POST', body: { hotel_id: hotelId, username, password } satisfies LoginRequest }),
+    request<LoginResponse>('/auth/login', { method: 'POST', body: { hotel_id: hotelId, username, password } }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request<null>('/auth/change-password', { method: 'POST', body: { old_password: oldPassword, new_password: newPassword } }),
+  logout: () => request<null>('/auth/logout', { method: 'POST' }),
+
+  // ---------------------------------------------------------------- hotels
+  listHotels: () => request<HotelDto[]>('/hotels'),
+
+  // ---------------------------------------------------------------- users/roles
+  listUsers: () => request<UserDto[]>('/users'),
+  createUser: (b: { hotel_id?: number; username: string; full_name?: string; role: string; password: string }) =>
+    request<UserDto>('/users', { method: 'POST', body: b }),
+  roleMatrix: (role: string) => request<RoleMatrix>(`/roles/${role}/permissions`),
+
+  // ---------------------------------------------------------------- rooms
+  listRoomTypes: () => request<RoomTypeDto[]>('/room-types'),
+  listRooms: () => request<RoomDto[]>('/rooms'),
+  setCleanliness: (roomId: string, cleanliness: string, notes?: string) =>
+    request<RoomDto>(`/rooms/${roomId}/cleanliness`, { method: 'PATCH', body: { cleanliness, notes } }),
+
+  // ---------------------------------------------------------------- guests
+  listGuests: (search?: string) => request<GuestDto[]>('/guests', { query: { search } }),
+  createGuest: (b: { full_name: string; nationality?: string; phone?: string; email?: string; is_primary?: boolean }) =>
+    request<GuestDto>('/guests', { method: 'POST', body: b }),
+
+  // ---------------------------------------------------------------- channels/price rules
+  listChannels: () => request<ChannelDto[]>('/channels'),
+  listPriceRules: () => request<PriceRuleDto[]>('/price-rules'),
+  createPriceRule: (b: { room_type_id: string; date_from: string; date_to: string; price_cents: number; currency?: string }) =>
+    request<PriceRuleDto>('/price-rules', { method: 'POST', body: b }),
+
+  // ---------------------------------------------------------------- reservations
+  listReservations: (q?: ReservationListQuery) => request<ReservationDto[]>('/reservations', { query: q as ReqInit['query'] }),
+  getReservation: (id: string) => request<ReservationDto>(`/reservations/${id}`),
+  createReservation: (b: CreateReservationBody) => request<ReservationDto>('/reservations', { method: 'POST', body: b }),
+  editReservation: (id: string, patch: Partial<CreateReservationBody>) =>
+    request<ReservationDto>(`/reservations/${id}`, { method: 'PATCH', body: patch }),
+  checkIn: (id: string) => request<ReservationDto>(`/reservations/${id}/check-in`, { method: 'POST' }),
+  checkOut: (id: string) => request<ReservationDto>(`/reservations/${id}/check-out`, { method: 'POST' }),
+  cancelReservation: (id: string) => request<ReservationDto>(`/reservations/${id}/cancel`, { method: 'POST' }),
+
+  // ---------------------------------------------------------------- payments/folio
+  listPayments: (reservationId: string) => request<PaymentDto[]>(`/reservations/${reservationId}/payments`),
+  addPayment: (reservationId: string, b: { amount_cents: number; payment_type: string; currency?: string; reference?: string }) =>
+    request<PaymentDto>(`/reservations/${reservationId}/payments`, { method: 'POST', body: b }),
+  reversePayment: (paymentId: string) => request<PaymentDto>(`/payments/${paymentId}/reverse`, { method: 'POST' }),
+  listFolio: (reservationId: string) => request<FolioDto[]>(`/reservations/${reservationId}/folio`),
+  addFolio: (reservationId: string, b: { category: string; description: string; unit_price_cents: number; quantity: number }) =>
+    request<FolioDto>(`/reservations/${reservationId}/folio`, { method: 'POST', body: b }),
+
+  // ---------------------------------------------------------------- board
+  board: (from: string, to: string) => request<BoardResponse>('/board', { query: { from, to } }),
 }
