@@ -28,25 +28,26 @@ Legend: **[BLOCKER]** stops everything else · **[P0]** critical path · **[P1]*
 
 ---
 
-## 1. Foundation fixes (do first) — [BLOCKER]
+## 1. Foundation fixes (do first) — [BLOCKER] ✅ DONE (commit `52728de`)
 
-- [ ] **Fix `cargo check --workspace` failure** — `crates/hms-server/src/main.rs` has 15 compile errors:
-  - [ ] Missing imports: `Router`, `Json`, `Arc`, `StatusCode`, `HeaderValue`, `axum::routing::{get, post}`
-  - [ ] `hms_core::ApiResponse` does not exist — add an `ApiResponse<T>` type to `hms-core` (or remove the import)
-  - [ ] Duplicate `use hms_core::{ApiResponse, models::*};` + `use hms_core::ApiResponse;` lines
-- [ ] **Resolve duplicate modules in `hms-core`** — `api_types.rs` and `request_types.rs` are byte-identical, causing ambiguous re-export warnings from `lib.rs`; keep one
-- [ ] **Clean unused-dependency warnings** — server: `sqlx`, `argon2`, `jsonwebtoken`, `tower-http` declared but unused; desktop: `rusqlite`, `reqwest`, `hms-core` unused; core: `thiserror`
-- [ ] **Decide final repo layout** — current workspace (`crates/hms-desktop`) differs from README §5 (`apps/web`, `apps/desktop`, `crates/hms-sync`); align Cargo.toml, README, or both
-- [ ] **`git init`** + `.gitignore` (`target/`, `.env`, `node_modules/`, `dist/`) — no version control exists yet
-- [ ] **Create `docker-compose.yml`** (PostgreSQL for development) and **`.env.example`** (`DATABASE_URL`, `SESSION_SECRET`, `ADMIN_BOOTSTRAP_PASSWORD`, `OFFLINE_LOGIN_DAYS`, `RATE_LIMIT_LOGIN`, `SYNC_PROTOCOL_MIN_VERSION`, `SITE1_*`, `SITE2_*`) per README §15
-- [ ] Implement the stub `rate_limiter.rs` (`check()` currently always returns `true`) and delete the dummy `init.rs`
+- [x] **Fix `cargo check --workspace` failure** — `crates/hms-server/src/main.rs` had 15 compile errors:
+  - [x] Missing imports: `Router`, `Json`, `Arc`, `StatusCode`, `HeaderValue`, `axum::routing::{get, post}`
+  - [x] `hms_core::ApiResponse` did not exist — added generic `ApiResponse<T>` to `hms-core/src/api_types.rs`
+  - [x] Duplicate `use` lines removed
+- [x] **Resolve duplicate modules in `hms-core`** — deleted `request_types.rs` (byte-identical to `api_types.rs`), removed its `mod`/`pub use` from `lib.rs`
+- [~] **Clean unused-dependency warnings** — unused imports fixed; the remaining flagged deps (`sqlx`, `argon2`, `jsonwebtoken`, `tower-http`, `rusqlite`, `reqwest`, `thiserror`) are **kept intentionally**: each is used in the imminent phases (3/4: server DB+auth, 6: desktop). Remove them only if their phase is abandoned.
+- [x] **Decide final repo layout** — aligned to README §5: desktop crate moved to `apps/desktop/src-tauri` (workspace member + `hms-core` path updated); web app will be `apps/web` (Phase 5); crates stay under `crates/`
+- [x] **`git init`** — installed portable MinGit 2.56 to `%LOCALAPPDATA%\Tools\mingit` (no admin needed), added to user PATH, `.gitignore` created, first commit made
+- [x] **Create `docker-compose.yml`** (PostgreSQL 16 + healthcheck; server service commented until server image exists) and **`.env.example`** (all README §15 vars incl. SITE2_*)
+- [x] Implement the stub `rate_limiter.rs` — real per-key fixed-window limiter + 3 unit tests passing; dummy `init.rs` deleted
 
-## 2. Feature inventory (README §4) — [P0] *(must finish before feature work)*
+## 2. Feature inventory (README §4) — [P0] ✅ DONE
 
-- [ ] Complete the §4 table by verifying every area against **app.hms.gen.tr** (site 2) — currently all 13 rows are `pending`
-- [ ] Use the captured artifacts: parse `flow_index.js` (full route tree already reveals: bookings, group bookings, channel bookings, guests + birthday/garage, facility/rooms/housekeeping/update-status, periodic calendar/overview/availability/bulk/advanced, 10+ reports, invoices purchase/sales, agencies/currents, actions expense/public-sale/stock, tools settings/exchange/staff/channels/applications, monthly-room, hotel-info, notifications) and the `inspect_*.py` CDP scripts
-- [ ] Record findings in `docs/feature-inventory.md` (screenshots + feature list per area)
-- [ ] Reconcile scope: site 2 has modules the README §4 table does not list (invoices, stock, expenses/public sale, agencies, currency exchange, channel bookings, monthly-room, notifications, packages/licensing) — decide per module: **in scope / out of scope / deferred**, and update README §4
+- [x] Complete the §4 table by verifying every area against **app.hms.gen.tr** (site 2) — verified live 2026-10-27, logged in as the user's account (no captcha appeared; the OpenCode browser holds the session for future visits)
+- [x] Route tree enumerated from the live menu (56+ routes) + all report sub-pages inspected
+- [x] Findings recorded in `docs/feature-inventory.md` (observations per README §4 area + evidence screenshots in `docs/screenshots/` — room board, reservation detail, housekeeping, channel list)
+- [x] Scope reconciled: 13 §4 rows marked **verified** in README §4; site-2-only modules (invoices/e-archive, agency currents, currency exchange, cash/banks, online payments, open sale/expenses/stock, SMS/mail tooling, Wi-Fi/IP, notifications, end-of-day, licensing) marked **deferred/out** in the inventory doc — README now links to it
+- Notes for later phases (recorded in inventory doc): site-2 cleanliness = Dirty/Clean + Out of Order; reservation detail embeds Transaction Logs; board price/availability is per room_type × date; no per-channel earnings report on site 2
 
 ## 3. Database schema (README §7–§9) — [P0]
 

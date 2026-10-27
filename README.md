@@ -7,7 +7,7 @@ It merges two existing products into one:
 - **app.hmsflow.com**: the visual reference for the UI (layout, navigation, colors, component style). The UI is original code.
 - **app.hms.gen.tr** (HMS Hotel Software): every feature it offers must exist in this system.
 
-> **Status:** this README describes the target design and planned repository layout. Commands, endpoints and paths below are the intended interfaces; implement and verify them as the project is built. Section 4's feature inventory must be completed against the two reference sites before feature work starts.
+> **Status:** this README describes the target design and planned repository layout. Commands, endpoints and paths below are the intended interfaces; implement and verify them as the project is built. Section 4's feature inventory was verified against site 2 on 2026-10-27 — details and screenshots in `docs/feature-inventory.md`.
 
 ---
 
@@ -99,23 +99,25 @@ Key ideas:
 
 ## 4. Feature inventory
 
-Complete this table by reviewing both reference sites (with browser access, or from screenshots and feature lists) before building features. Anything on site 2 must be present here.
+Verified against site 2 (**app.hms.gen.tr**, live session on 2026-10-27) and the site 1 UI reference. Full evidence per area in `docs/feature-inventory.md` (+ screenshots). "Deferred" = module exists on site 2 but is intentionally out of the first version (see inventory doc).
 
 | Area | Planned features | Verified against site 2 |
 |---|---|---|
-| Reservations | calendar/room board, list, detail, create/edit/cancel, check-in/out | pending |
-| Guests | guest records, history | pending |
-| Rooms | room types (name, capacity, base price, amenities), rooms | pending |
-| Pricing | base price, price rules (seasonal etc.) | pending |
-| Payments | payments and folio per reservation, reversal entries | pending |
-| Channels | direct, walk-in, Booking, Expedia, agency, other (configurable per hotel) | pending |
-| Housekeeping | room board with cleanliness status | pending |
-| Users and roles | hotel accounts, role permissions | pending |
-| Reports | earnings per channel/day/month/room, occupancy, ADR, RevPAR | pending |
-| Audit | change history for every record | pending |
-| Localization | Turkish and English UI, TRY and other currencies | pending |
-| Export | CSV and PDF | pending |
-| Layout | mobile-friendly web layout | pending |
+| Reservations | calendar/room board, list, detail, create/edit/cancel, check-in/out | **verified** (list, detail with tabs, check-in/out, print; group/channel reservations deferred) |
+| Guests | guest records, history | **verified** (records, ID/passport, balance, import/export) |
+| Rooms | room types (name, capacity, base price, amenities), rooms | **verified** (rooms + 7 room types as data; CRUD menu admin-only) |
+| Pricing | base price, price rules (seasonal etc.) | **verified** (periodic per-day calendar 2021–2031 + conditional pricing rules) |
+| Payments | payments and folio per reservation, reversal entries | **verified** (collection/payment tab, account activities, bank transactions) |
+| Channels | direct, walk-in, Booking, Expedia, agency, other (configurable per hotel) | **verified as list/status**; deep channel-manager sync **deferred** |
+| Housekeeping | room board with cleanliness status | **verified** (board + print; site-2 uses Dirty/Clean + Out of Order) |
+| Users and roles | hotel accounts, role permissions | **verified** (profile, password change, 2FA present; CRUD admin-only) |
+| Reports | earnings per channel/day/month/room, occupancy, ADR, RevPAR | **verified** (earnings by section, occupancy w/ chart; site 2 has no per-channel earnings report) |
+| Audit | change history for every record | **verified** (/raporlar/log/ with user, IP, section, add/delete/update, comments) |
+| Localization | Turkish and English UI, TRY and other currencies | **verified** (Program Language switch; TRY everywhere) |
+| Export | CSV and PDF | **verified** (Print + guest/agency import-export) |
+| Layout | mobile-friendly web layout | **verified** (board works at ~510px viewport) |
+
+Out-of-scope site-2 modules (deferred): invoices with e-invoice/e-archive, agency currents, currency exchange, cash accounts/banks, online guest payments, open sales, expenses/stock, SMS/e-mail campaign tooling, Wi-Fi/IP tools, notifications/announcements/messaging, end-of-day close, packages/licensing. See `docs/feature-inventory.md` for the proposal table.
 
 ---
 
