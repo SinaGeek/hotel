@@ -137,14 +137,17 @@ Legend: **[BLOCKER]** stops everything else Â· **[P0]** critical path Â· **[
 
 **Phase 7 verification notes:** endpoints exercised live on the 4173 preview as `mtest` â€” Oct 27â†’Nov 5 range: room â‚º12,000 + extras â‚º300 (minibar), collected â‚º0 (reversed payment nets out), occupancy 4/18 nights = 22.2%, ADR â‚º3,000 = room-type base price, RevPAR â‚º666.67. `by-channel`/`by-room`/`by-day` totals match `daily_revenue` sums (SUM room_revenue_cents = 1,200,000 cents, extras = 30,000 cents).
 
-## 8. Tests (README Â§16) â€” [P1] *(currently zero tests)*
+## 8. Tests (README Â§16) — [P1] *(hms-tests crate added; 8 tests green — commit `36e2a17`)*
 
-- [ ] Permission matrix test: every role Ã— every action matches Â§6
-- [ ] Tenant isolation test: hotel A can never read/write hotel B (RLS)
-- [ ] Double-booking race test: concurrent bookings for one room never both succeed
-- [ ] Report integrity test: report totals == sum of raw payments
-- [ ] Sync tests: offline N days then sync; two offline clients same room â†’ `conflict`; server outage mid-sync; interrupted/repeated sync â†’ no duplicates; clock-skewed client cannot win
-- [ ] `tests/` directory for integration tests (missing) + CI running `cargo test` and `cargo clippy`
+- [x] Permission matrix test: every role Ã— every permission matches §6 (`crates/hms-tests/tests/roles_matrix.rs` — matrices written BY HAND from §6 so no drift; wire-name round-trip; housekeeping masking invariant). 3 tests green.
+- [x] Tenant isolation test: hotel A can never read/write hotel B (`db_guards.rs::tenant_isolation_rls_hides_and_blocks_other_hotels`) — connects as the REAL RLS role `hms_app` with `app.hotel_id`: own room visible, hotel B ops row invisible, cross-tenant UPDATE affects 0 rows (USING), cross-tenant INSERT violates WITH CHECK, `app.is_platform_admin` sees both tenants.
+- [x] Double-booking tests (`db_guards.rs`): (a) exact/leading/trailing overlap REJECTED by the `no_double_booking` EXCLUDE constraint; adjacency [) allowed; cancelled/conflict don't block; tombstoned rows don't block; (b) **race test: 8 concurrent inserts -> exactly 1 wins**.
+- [x] Payments append-only test: as `hms_app`, INSERT ok, SELECT ok, UPDATE/DELETE -> `permission denied` (GRANT-based).
+- [x] Report integrity test: `sum(daily_revenue.room_revenue) == reservation.total_price_cents`, extras == folio ledger total, collected == payments ledger total.
+- [ ] Sync tests: offline N days then sync; two offline clients same room â†’ `conflict`; server outage mid-sync; interrupted/repeated sync â†’ no duplicates; clock-skewed client cannot win *(Phase 6 — the sync crate doesn't exist yet)*
+- [x] `crates/hms-tests` integration-test crate in the workspace + CI workflow (`.github/workflows/ci.yml`: cargo test + clippy + web lint/build, with a postgres:16 service container setting `TEST_DATABASE_URL`). **DB tests are gated on `TEST_DATABASE_URL`** (e.g. `postgres://postgres:postgres@localhost:5432/hms_test`) and print `[skip]` when unset, so `cargo test` stays green without infra. Local run: create the `hms_test` DB first (`DROP DATABASE IF EXISTS hms_test; CREATE DATABASE hms_test;`), set the env var, `cargo test -p hms-tests`.
+
+**Test-run notes:** fixtures use unique-per-run hotel ids (no truncation needed); tests run in parallel (share `hms_test`); the platform-admin room-count assertion filters `hotel_id = ANY(fixture_ids)` because older fixture rows persist across runs. `ALTER ROLE hms_app LOGIN PASSWORD 'hmstest-local'` runs once per process (catalog-update race otherwise). hms-core clippy has 2 pre-existing benign warnings (custom `from_str`, derivable impl) — cleanup candidate for Phase 10.
 
 ## 9. Seed data + load testing (README Â§13) â€” [P1]
 
