@@ -34,3 +34,32 @@ impl fmt::Display for ValidationError {
 }
 
 impl Error for ValidationError {}
+
+impl ValidationError {
+    pub fn status_code(&self) -> u16 {
+        match self {
+            ValidationError::InvalidDateRange
+            | ValidationError::StayDurationExceeded(_)
+            | ValidationError::PriceMismatch { .. }
+            | ValidationError::InvalidPax
+            | ValidationError::EmptyField(_) => 400,
+            ValidationError::DateTooFarInFuture | ValidationError::ClockSkewRejected(_) => 422,
+        }
+    }
+}
+
+/// Seasonal pricing rule checks (README §4, §7).
+pub fn validate_price_rule(
+    date_from: chrono::NaiveDate,
+    date_to: chrono::NaiveDate,
+    price_cents: i64,
+) -> Result<(), ValidationError> {
+    if date_from > date_to {
+        return Err(ValidationError::InvalidDateRange);
+    }
+    if price_cents < 0 {
+        return Err(ValidationError::PriceMismatch { total: price_cents, sum: 0 });
+    }
+    Ok(())
+}
+

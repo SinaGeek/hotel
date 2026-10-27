@@ -45,12 +45,13 @@ pub struct Room {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum ReservationStatus {
     Confirmed,
     CheckedIn,
     CheckedOut,
     Cancelled,
+    /// DB value is 'conflict' (README §9 wording); wire value kept as `conflict`.
+    #[serde(rename = "conflict")]
     ConflictNeedsReassignment,
 }
 

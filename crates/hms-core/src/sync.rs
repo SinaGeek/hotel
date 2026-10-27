@@ -22,6 +22,7 @@ pub enum EntityType {
     FolioTransaction,
     PriceRule,
     User,
+    Channel,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
