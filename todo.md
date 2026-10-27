@@ -49,18 +49,20 @@ Legend: **[BLOCKER]** stops everything else · **[P0]** critical path · **[P1]*
 - [x] Scope reconciled: 13 §4 rows marked **verified** in README §4; site-2-only modules (invoices/e-archive, agency currents, currency exchange, cash/banks, online payments, open sale/expenses/stock, SMS/mail tooling, Wi-Fi/IP, notifications, end-of-day, licensing) marked **deferred/out** in the inventory doc — README now links to it
 - Notes for later phases (recorded in inventory doc): site-2 cleanliness = Dirty/Clean + Out of Order; reservation detail embeds Transaction Logs; board price/availability is per room_type × date; no per-channel earnings report on site 2
 
-## 3. Database schema (README §7–§9) — [P0]
+## 3. Database schema (README §7–§9) — [P0] ✅ DONE (commit `9eb9f9b` + runtime verification on 2026-10-27)
 
-- [ ] Write PostgreSQL migrations in `migrations/` (currently empty) for all tables:
-  - [ ] `hotels` (with per-hotel `change_seq` counter), `users`, `roles`, `role_permissions`
-  - [ ] `room_types`, `rooms`, `guests`, `channels`, `price_rules`
-  - [ ] `reservations`, `payments` (append-only), `folio_transactions` (model exists in Rust, table missing)
-  - [ ] `change_log`, `sync_ops`, `daily_revenue`, `audit_log`
-- [ ] `CREATE EXTENSION btree_gist` + the `no_double_booking` EXCLUDE constraint on `reservations` (README §9) — double booking must be prevented **by the database**
-- [ ] Indexes per §13: `(hotel_id, room_id, stay)`, `(hotel_id, status)`, `(hotel_id, created_at)` + keyset-pagination support
-- [ ] Enable **row-level security** on every table; every query must run with a tenant scope (README §8)
-- [ ] Run migrations on server start (`sqlx::migrate!` — the `migrate` feature is already enabled but unused)
-- [ ] Seed the platform tenant (hotel ID 0) + `admin` account with `ADMIN_BOOTSTRAP_PASSWORD` and forced password change on first login
+- [x] PostgreSQL migrations in `migrations/` for all tables:
+  - [x] `hotels` (with per-hotel `next_change_seq` counter), `users`, `roles`, `role_permissions` + `hotel_permission_overrides`
+  - [x] `room_types`, `rooms`, `guests`, `channels` (configurable per hotel), `price_rules`
+  - [x] `reservations` (daterange `stay`), `payments` (append-only grants), `folio_transactions`
+  - [x] `change_log`, `sync_ops`, `daily_revenue`, `audit_log`
+- [x] `CREATE EXTENSION btree_gist` + `no_double_booking` EXCLUDE constraint — **verified live**: overlapping confirmed booking rejected by DB; `conflict` status allowed (sync-collision path works)
+- [x] Indexes per §13: `(hotel_id, room_id, stay)`, `(hotel_id, status)`, `(hotel_id, created_at)` + keyset support
+- [x] Row-level security on every table — **verified live as non-superuser `hms_app`**: hotel 4442 scope sees only its rows; other-hotel scope and no-scope return 0; cross-hotel INSERT blocked by WITH CHECK
+- [x] Migrations run on server start (`sqlx::migrate!("../../migrations")` in `hms-server/src/main.rs`) — verified live
+- [x] Platform tenant (hotel 0) seeded by migration; `admin` account created by server bootstrap with `ADMIN_BOOTSTRAP_PASSWORD` (or a generated one printed once), `force_password_change = true` — verified live
+
+**Dev DB note:** Docker Desktop is unusable on this machine (virtualization disabled in firmware until the user enables VT-x in BIOS). Using portable PostgreSQL 16.9 installed to `%LOCALAPPDATA%\Tools\pgsql` with data at `%LOCALAPPDATA%\Tools\pgdata` (started via `pg_ctl`, database `hms`, superuser `postgres`, trust auth, port 5432). When VT-x is enabled the Docker path (`docker compose up -d db`) becomes available again.
 
 ## 4. Server: auth, RBAC, core services (README §6, §8, §12) — [P0]
 

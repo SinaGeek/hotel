@@ -65,7 +65,7 @@ async fn main() {
 }
 
 async fn health_check(State(state): State<Arc<AppState>>) -> Json<ApiResponse<String>> {
-    match sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(&state.db).await {
+    match sqlx::query_scalar::<_, i64>("SELECT 1::int8").fetch_one(&state.db).await {
         Ok(_) => Json(ApiResponse { success: true, data: "HMS Server is running (db ok)".to_string(), error: None }),
         Err(e) => Json(ApiResponse { success: false, data: String::new(), error: Some(format!("db error: {e}")) }),
     }
