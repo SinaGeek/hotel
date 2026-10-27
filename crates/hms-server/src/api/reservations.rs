@@ -368,9 +368,10 @@ pub async fn create(
     .await
     .map_err(|e| ApiError(StatusCode::CONFLICT, format!("cannot book (no double booking): {e}")))?;
 
-    // change stream + audit + pre-aggregation in the SAME transaction (README Ã‚Â§10/Ã‚Â§11)
-    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "reservation", id, "insert",
-        serde_json::json!({"reservation": id})).await?;
+    // audit + pre-aggregation in the SAME transaction (README §10/§11).
+    // record_change runs LAST: it row-locks the hotels row (change-seq bump)
+    // until commit, so keeping it last keeps the critical section (~0 queries
+    // + commit) short enough for concurrent saves to hit the p95 target.
     db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "reservation", id, "created", None,
         serde_json::to_value(&body).ok()).await?;
     upsert_daily_revenue(&mut conn, &ReservationUpsertInfo {
@@ -382,6 +383,8 @@ pub async fn create(
         status: "confirmed".into(),
         daily_rates: serde_json::to_value(&rates).unwrap_or_default(),
     }).await?;
+    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "reservation", id, "insert",
+        serde_json::json!({"reservation": id})).await?;
     conn.commit().await.map_err(ApiError::from)?;
 
     let row: ReservationDto = sqlx::query_as(
@@ -470,13 +473,14 @@ pub async fn edit(
     .map_err(|e| ApiError(StatusCode::CONFLICT, format!("update not allowed (no double booking): {e}")))?;
 
     let op_id = Uuid::now_v7();
-    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "reservation", id, "update", serde_json::json!(&body)).await?;
+    // record_change last (row-locks the hotels row until commit — see create)
     db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "reservation", id, "updated",
         Some(serde_json::to_value(&existing).unwrap_or_default()), Some(serde_json::json!(&body))).await?;
     upsert_daily_revenue(&mut conn, &ReservationUpsertInfo {
         hotel_id: auth.hotel_id, room_id, channel_id, checkin_date: checkin, checkout_date: checkout,
         status: existing.status.clone(), daily_rates: serde_json::to_value(&rates).unwrap_or_default(),
     }).await?;
+    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "reservation", id, "update", serde_json::json!(&body)).await?;
     conn.commit().await.map_err(ApiError::from)?;
 
     let row: ReservationDto = sqlx::query_as(
@@ -517,8 +521,7 @@ pub async fn status_change(
         .bind(id).bind(new_status).bind(auth.hotel_id)
         .execute(&mut *conn).await.map_err(ApiError::from)?;
     let op_id = Uuid::now_v7();
-    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "reservation", id, "update",
-        serde_json::json!({"status": new_status})).await?;
+    // record_change last (row-locks the hotels row until commit — see create)
     db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "reservation", id, new_status,
         Some(serde_json::json!({"status": existing.status})), Some(serde_json::json!({"status": new_status}))).await?;
     if new_status == "cancelled" {
@@ -528,6 +531,8 @@ pub async fn status_change(
             status: new_status.to_string(), daily_rates: existing.daily_rates.clone(),
         }).await?;
     }
+    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "reservation", id, "update",
+        serde_json::json!({"status": new_status})).await?;
     conn.commit().await.map_err(ApiError::from)?;
     let row: ReservationDto = sqlx::query_as(
         "SELECT id, hotel_id, room_id, channel_id, guest_id, checkin_date, checkout_date, status, daily_rates, total_price_cents, currency, adults, children, notes, voucher_number, created_at FROM reservations WHERE id = $1",
@@ -644,10 +649,31 @@ async fn board(
     .await
     .map_err(ApiError::from)?;
 
-    // housekeeping role must never see guest names/prices (README Ã‚Â§6)
+    // housekeeping role must never see guest names/prices (README §6)
     let see_financials = hms_core::roles::Role::from_str(&auth.role)
         .map(|r| r.can_see_financials_and_guests())
         .unwrap_or(true);
+
+    // Batched per-room-type pricing at the board start date: ONE query for all
+    // room types (the effective price the per-room loop used to look up
+    // individually — O(rooms) queries per request).
+    let rt_prices: Vec<(Uuid, i64)> = sqlx::query_as(
+        r#"SELECT rt.id,
+                  COALESCE(NULLIF(
+                    (SELECT pr.price_cents FROM price_rules pr
+                     WHERE pr.hotel_id = $1 AND pr.room_type_id = rt.id AND pr.deleted_at IS NULL
+                       AND pr.date_from <= $2 AND pr.date_to >= $2
+                     ORDER BY pr.date_from DESC LIMIT 1), 0),
+                    rt.base_price_cents)
+           FROM room_types rt
+           WHERE rt.hotel_id = $1 AND rt.deleted_at IS NULL"#,
+    )
+    .bind(auth.hotel_id)
+    .bind(q.from)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(ApiError::from)?;
+    let price_by_rt: std::collections::HashMap<Uuid, i64> = rt_prices.into_iter().collect();
 
     let stay_map: std::collections::HashMap<Uuid, Vec<&(Uuid, Uuid, chrono::NaiveDate, chrono::NaiveDate, String, Option<String>, i64, String)>> =
         stays.iter().fold(std::collections::HashMap::new(), |mut m, s| {
@@ -657,7 +683,7 @@ async fn board(
 
     let mut rooms = Vec::new();
     for (id, number, rt_id, rt_name, cleanliness) in &room_ids {
-        let seasonal_price_cents = effective_price_for_date(&mut *conn, auth.hotel_id, *rt_id, q.from).await.unwrap_or(0);
+        let seasonal_price_cents = price_by_rt.get(rt_id).copied().unwrap_or(0);
         let stay_rows = stay_map.get(id).cloned().unwrap_or_default();
         let mut stay_list = Vec::new();
         for s in stay_rows {
@@ -682,15 +708,24 @@ async fn board(
         });
     }
 
-    // day occupancy + cheapest price (per-day subquery avoids join duplication)
-    let by_day: Vec<(chrono::NaiveDate, i64)> = sqlx::query_as(
+    // day occupancy + cheapest effective price — ONE query for the whole range
+    // (the previous code ran one query per day × room type)
+    let by_day: Vec<(chrono::NaiveDate, i64, Option<i64>)> = sqlx::query_as(
         r#"SELECT d.t::date,
                   (SELECT count(*) FROM reservations res
                    WHERE res.hotel_id = $1 AND res.deleted_at IS NULL
                      AND res.status IN ('confirmed','checked_in')
-                     AND res.checkin_date <= d.t::date AND res.checkout_date > d.t::date)
+                     AND res.checkin_date <= d.t::date AND res.checkout_date > d.t::date) AS occupied,
+                  (SELECT min(NULLIF(COALESCE(
+                     (SELECT pr.price_cents FROM price_rules pr
+                      WHERE pr.hotel_id = $1 AND pr.room_type_id = rt.id AND pr.deleted_at IS NULL
+                        AND pr.date_from <= d.t::date AND pr.date_to >= d.t::date
+                      ORDER BY pr.date_from DESC LIMIT 1),
+                     rt.base_price_cents), 0))
+                   FROM room_types rt
+                   WHERE rt.hotel_id = $1 AND rt.deleted_at IS NULL) AS cheapest
            FROM generate_series($2::date, ($3::date - INTERVAL '1 day'), INTERVAL '1 day') AS d(t)
-           ORDER BY (d.t::date)"#,
+           ORDER BY 1"#,
     )
     .bind(auth.hotel_id)
     .bind(q.from)
@@ -701,16 +736,7 @@ async fn board(
 
     let total_rooms = room_ids.len() as i64;
     let mut occupancy = Vec::new();
-    for (date, occ) in by_day {
-        let mut cheapest: Option<i64> = None;
-        let mut d = date;
-        let _ = d;
-        for (_, _, rt_id, _, _) in &room_ids {
-            let p = effective_price_for_date(&mut *conn, auth.hotel_id, *rt_id, date).await.unwrap_or(0);
-            if p > 0 && cheapest.map(|c| p < c).unwrap_or(true) {
-                cheapest = Some(p);
-            }
-        }
+    for (date, occ, cheapest) in by_day {
         occupancy.push(BoardDay { date, available: total_rooms - occ, occupied: occ, from_price_cents: cheapest });
     }
 

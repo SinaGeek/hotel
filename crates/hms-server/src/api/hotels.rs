@@ -33,10 +33,14 @@ async fn list(
         // tenant users see only their own hotel
         let mut conn = state.db.acquire().await.map_err(ApiError::from)?;
         db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
-        let rows: Vec<HotelDto> = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active, next_change_seq FROM hotels WHERE deleted_at IS NULL").fetch_all(&mut *conn).await.map_err(ApiError::from)?;
+        let rows: Vec<HotelDto> = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active,
+       COALESCE((SELECT max(change_seq) FROM change_log WHERE hotel_id = hotels.id), 0) AS next_change_seq
+       FROM hotels WHERE deleted_at IS NULL").fetch_all(&mut *conn).await.map_err(ApiError::from)?;
         return Ok(Json(ApiResponse { success: true, data: rows, error: None }));
     }
-    let rows: Vec<HotelDto> = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active, next_change_seq FROM hotels WHERE deleted_at IS NULL ORDER BY id")
+    let rows: Vec<HotelDto> = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active,
+       COALESCE((SELECT max(change_seq) FROM change_log WHERE hotel_id = hotels.id), 0) AS next_change_seq
+       FROM hotels WHERE deleted_at IS NULL ORDER BY id")
         .fetch_all(&state.db)
         .await
         .map_err(ApiError::from)?;
@@ -54,14 +58,18 @@ async fn by_id(
     if auth.role.contains("admin") {
         let mut conn = state.db.acquire().await.map_err(ApiError::from)?;
         db::set_platform_scope(&mut conn).await?;
-        let row: HotelDto = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active, next_change_seq FROM hotels WHERE id = $1 AND deleted_at IS NULL")
+        let row: HotelDto = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active,
+       COALESCE((SELECT max(change_seq) FROM change_log WHERE hotel_id = hotels.id), 0) AS next_change_seq
+       FROM hotels WHERE id = $1 AND deleted_at IS NULL")
             .bind(id)
             .fetch_one(&mut *conn)
             .await
             .map_err(|_| ApiError(StatusCode::NOT_FOUND, "hotel not found".into()))?;
         return Ok(Json(ApiResponse { success: true, data: row, error: None }));
     }
-    let row: HotelDto = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active, next_change_seq FROM hotels WHERE id = $1 AND deleted_at IS NULL")
+    let row: HotelDto = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active,
+       COALESCE((SELECT max(change_seq) FROM change_log WHERE hotel_id = hotels.id), 0) AS next_change_seq
+       FROM hotels WHERE id = $1 AND deleted_at IS NULL")
         .bind(id)
         .fetch_one(&state.db)
         .await
@@ -106,7 +114,9 @@ async fn create(
         .map_err(ApiError::from)?;
     conn.commit().await.map_err(ApiError::from)?;
 
-    let row: HotelDto = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active, next_change_seq FROM hotels WHERE id = $1")
+    let row: HotelDto = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active,
+       COALESCE((SELECT max(change_seq) FROM change_log WHERE hotel_id = hotels.id), 0) AS next_change_seq
+       FROM hotels WHERE id = $1")
         .bind(body.id)
         .fetch_one(&state.db)
         .await
@@ -132,7 +142,9 @@ async fn update(
         return Err(ApiError(StatusCode::FORBIDDEN, "only platform admin can edit hotels".into()));
     }
     let op_id = uuid::Uuid::now_v7();
-    let old: Option<HotelDto> = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active, next_change_seq FROM hotels WHERE id = $1")
+    let old: Option<HotelDto> = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active,
+       COALESCE((SELECT max(change_seq) FROM change_log WHERE hotel_id = hotels.id), 0) AS next_change_seq
+       FROM hotels WHERE id = $1")
         .bind(id)
         .fetch_optional(&state.db)
         .await
@@ -164,7 +176,9 @@ async fn update(
         Some(serde_json::to_value(&body).unwrap_or_default())).await?;
     conn.commit().await.map_err(ApiError::from)?;
 
-    let row: HotelDto = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active, next_change_seq FROM hotels WHERE id = $1")
+    let row: HotelDto = sqlx::query_as("SELECT id, name, default_currency, time_zone, is_active,
+       COALESCE((SELECT max(change_seq) FROM change_log WHERE hotel_id = hotels.id), 0) AS next_change_seq
+       FROM hotels WHERE id = $1")
         .bind(id)
         .fetch_one(&state.db)
         .await

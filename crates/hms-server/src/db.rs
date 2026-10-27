@@ -30,8 +30,9 @@ pub async fn set_platform_scope(conn: &mut PgConnection) -> Result<(), (StatusCo
     Ok(())
 }
 
-/// Allocate the next change_seq for a hotel (row-locked inside the tx) and
-/// append a change_log row for the sync pull stream.
+/// Allocate the next change_seq for the change_log sync stream (README §11):
+/// a dedicated PG sequence — monotonically increasing and never row-locked,
+/// so concurrent writes don't serialize on a hotels counter row (see 0008).
 pub async fn record_change(
     conn: &mut PgConnection,
     hotel_id: i64,
@@ -42,10 +43,7 @@ pub async fn record_change(
     operation: &str,
     payload: serde_json::Value,
 ) -> Result<i64, (StatusCode, String)> {
-    let seq: i64 = sqlx::query_scalar(
-        "UPDATE hotels SET next_change_seq = next_change_seq + 1 WHERE id = $1 RETURNING next_change_seq",
-    )
-    .bind(hotel_id)
+    let seq: i64 = sqlx::query_scalar("SELECT nextval('change_log_seq')")
     .fetch_one(&mut *conn)
     .await
     .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("change_seq: {e}")))?;

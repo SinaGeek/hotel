@@ -9,6 +9,7 @@ use hms_core::ApiResponse;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::sync::Arc;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::EnvFilter;
 
@@ -31,7 +32,15 @@ async fn main() {
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/hms".to_string());
 
     let db = PgPoolOptions::new()
-        .max_connections(20)
+        .max_connections(
+            std::env::var("DB_POOL_MAX").ok().and_then(|v| v.parse().ok()).unwrap_or(20),
+        )
+        // Pre-warm so the first requests after start don't pay per-connection
+        // spawn cost (~100-300 ms per fresh backend on Windows) — otherwise the
+        // load-test p95 shows a cold-start tail (README §13).
+        .min_connections(
+            std::env::var("DB_POOL_MIN").ok().and_then(|v| v.parse().ok()).unwrap_or(10),
+        )
         .connect(&database_url)
         .await
         .expect("failed to connect to PostgreSQL");
@@ -70,6 +79,8 @@ async fn main() {
                 .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth_waterfall)),
         )
         .layer(cors)
+        // README §13: compress JSON responses (gzip/br) — big win for board/report payloads
+        .layer(CompressionLayer::new())
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
