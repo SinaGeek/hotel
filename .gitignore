@@ -1,0 +1,30 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock.tmp
+
+# Node / web
+node_modules/
+dist/
+apps/web/dist/
+*.local
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Captured reference-site artifacts (may contain data, keep out of history)
+*.min.js.bak
+*.http
+
+# Editor / OS
+.vscode/*
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/schemas/

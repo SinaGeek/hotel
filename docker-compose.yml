@@ -1,0 +1,39 @@
+# Development environment: PostgreSQL + the HMS server.
+# Usage: docker compose up -d
+# The server itself runs with `cargo run -p hms-server` (it applies migrations on start).
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: hms-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-hms}
+    ports:
+      - "5432:5432"
+    volumes:
+      - hms-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-hms}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  server:
+    # Built from the repo's Dockerfile (see crates/hms-server/Dockerfile).
+    # Commented out until the server image exists; `cargo run -p hms-server`
+    # against the db service is the development workflow for now.
+    # build:
+    #   context: .
+    #   dockerfile: crates/hms-server/Dockerfile
+    # ports:
+    #   - "8080:8080"
+    # environment:
+    #   DATABASE_URL: postgres://postgres:postgres@db:5432/hms
+    # depends_on:
+    #   db:
+    #     condition: service_healthy
+
+volumes:
+  hms-db-data:
