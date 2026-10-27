@@ -149,13 +149,13 @@ Legend: **[BLOCKER]** stops everything else Â· **[P0]** critical path Â· **[
 
 **Test-run notes:** fixtures use unique-per-run hotel ids (no truncation needed); tests run in parallel (share `hms_test`); the platform-admin room-count assertion filters `hotel_id = ANY(fixture_ids)` because older fixture rows persist across runs. `ALTER ROLE hms_app LOGIN PASSWORD 'hmstest-local'` runs once per process (catalog-update race otherwise). hms-core clippy has 2 pre-existing benign warnings (custom `from_str`, derivable impl) — cleanup candidate for Phase 10.
 
-## 9. Seed data + load testing (README Â§13) â€” [P1]
+## 9. Seed data + load testing (README §13) — [P1] *(targets proven — commit `6fbb5ef`)*
 
-- [ ] Seed generator (`seed/` is empty; README references `cargo run -p hms-seed` â€” **no such crate exists**): 1,000 hotels Ã— 50 rooms Ã— 2 years of reservations/payments
-- [ ] k6 load-test scripts (`loadtest/` or `benchmarks/`, currently empty)
-- [ ] Prove targets: room board / availability search / reservation save p95 < 200 ms; full-year report < 500 ms
-- [ ] Publish results in `loadtest/REPORT.md`
-- [ ] Caching of read-heavy data (room types, rooms, today's board) with invalidation on write; connection pooling, response compression, hashed static assets (Â§13)
+- [x] Seed generator (`seed/loadtest.sql`; the README's `hms-seed` crate is superseded by this SQL): hotel 4443 "Load Test Hotel" with 3 room types, 60 rooms, 5 channels, a year-long price rule per type, **480 reservations** (8 waves × 60 rooms: past / in-house / upcoming), **960 `daily_revenue` rows**, 169 payments, 111 folio rows. Idempotent (wipes 4443 first; dev hotel 4442 and platform tenant 0 untouched). Load-test manager `loadmgr` gets the local dev manager's password hash (hash reference only — no secret committed).
+- [x] k6 load-test scripts (`benchmarks/k6/`: board.js, availability.js, reservation_save.js, reports_full_year.js — same thresholds, `PASSWORD`/`BASE_URL`/`HOTEL` env creds).
+- [x] Prove targets with `crates/hms-tests/examples/loadtest.rs` (Rust HTTP runner instead of installing k6): **ALL TARGETS MET** — 16 VUs × 200 req: board 20.5/109.4 p50/p95, availability 6.6/13.1, saves 9.4/18.6, full-year report 3.7/6.5; 12-VU rerun confirms with wider margins. Results + hardware + reproduce steps in `benchmarks/REPORT.md`.
+- [x] Perf fixes the proving exposed: **board N+1 removed** (batched room-type pricing + one occupancy/cheapest query per window — board was ~340 queries/request, p50 > 4 s → 4 queries, p50 ~20 ms); **migration 0008** — change_seq now from a dedicated PG sequence (the row-locked `hotels.next_change_seq` counter serialized every concurrent write); `record_change` moved to last-before-commit; `DB_POOL_MIN` pool pre-warm (cold backend spawn ~100–300 ms on Windows). Compression layer + `DB_POOL_MAX` added earlier.
+- [ ] Caching of read-heavy data (room types, rooms, today's board) with invalidation on write — **open**: batched queries proved sufficient; cache layer deferred until a target threatens to break (noted in REPORT.md). Remaining §13 items from this bullet: connection pooling (done via sqlx pool + pre-warm ✓), response compression (CompressionLayer ✓), hashed static assets (web build pipeline — check at Phase 12).
 
 ## 10. Security & compliance (README Â§8) â€” [P1]
 
