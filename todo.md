@@ -125,15 +125,17 @@ Legend: **[BLOCKER]** stops everything else Â· **[P0]** critical path Â· **[
 - [ ] Status UI: online/offline state, last-synced time, pending op count, unresolved conflicts; warnings about offline channel-booking overbooking risk and card payments
 - [ ] Tauri auto-updater + `.msi` installer packaging
 
-## 7. Reports (README Â§10) â€” [P1]
+## 7. Reports (README §10) — [P1] *(core done; polished charts + monthly view still open)*
 
-- [ ] Report queries must read `daily_revenue`, never raw reservations
-- [ ] Earnings per channel (donut + bar), per day (line), per month (bar + YoY line), per room/room type (ranked bar + heatmap)
-- [ ] Occupancy %, ADR, RevPAR (line / KPI cards)
-- [ ] Collected-vs-accrued toggle (default collected) â€” **and confirm with hotels which they expect** (open question in Â§10)
-- [ ] CSV + PDF export for every report
-- [ ] Platform admin sees all hotels; hotel users see only their own
-- [ ] Desktop computes the same reports from local data when offline
+- [x] Report queries must read `daily_revenue`, never raw reservations — `crates/hms-server/src/api/reports.rs`: `GET /reports/{summary,by-channel,by-day,by-room}?from&to` (inclusive `from`, exclusive `to`, max 400 days; tenant-scoped; `report_view_tenant` permission — live-verified 403 for housekeeping)
+- [x] Earnings per channel (bar â€” horizontal chart + table), per day (grouped bar chart + table), per room/room type (table) — **still open**: per-month rollup view, donut/heatmap variants (cosmetic)
+- [x] Occupancy %, ADR, RevPAR KPI cards (`occupied_nights / rooms Ã— days`, `room_revenue / occupied_nights`, `room_revenue / available_room_nights`) — **live-verified**: 22.2% (4/18), ADR â‚º3,000, RevPAR â‚º666.67 for Oct 27 â†’ Nov 5 test data
+- [ ] Collected-vs-accrued toggle (API returns both room/extra revenue AND collected payments; the UI toggle itself still TODO) â€” **and confirm with hotels which they expect** (open question in Â§10)
+- [x] CSV export for every report (BOM + Blob download, per table); PDF export = Print button (browser print-to-PDF) â€” native PDF rendering still open
+- [x] Hotel users see only their own hotel (queries all filter `auth.hotel_id`); platform-admin cross-hotel view deferred to Phase 10 (admin currently uses the same tenant endpoints with hotel 0 â€” to revisit with Issue "admin hotels list" in Phase 10)
+- [ ] Desktop computes the same reports from local data when offline *(Phase 6)*
+
+**Phase 7 verification notes:** endpoints exercised live on the 4173 preview as `mtest` â€” Oct 27â†’Nov 5 range: room â‚º12,000 + extras â‚º300 (minibar), collected â‚º0 (reversed payment nets out), occupancy 4/18 nights = 22.2%, ADR â‚º3,000 = room-type base price, RevPAR â‚º666.67. `by-channel`/`by-room`/`by-day` totals match `daily_revenue` sums (SUM room_revenue_cents = 1,200,000 cents, extras = 30,000 cents).
 
 ## 8. Tests (README Â§16) â€” [P1] *(currently zero tests)*
 
