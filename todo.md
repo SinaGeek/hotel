@@ -137,7 +137,7 @@ Legend: **[BLOCKER]** stops everything else Â· **[P0]** critical path Â· **[
 
 **Phase 7 verification notes:** endpoints exercised live on the 4173 preview as `mtest` â€” Oct 27â†’Nov 5 range: room â‚º12,000 + extras â‚º300 (minibar), collected â‚º0 (reversed payment nets out), occupancy 4/18 nights = 22.2%, ADR â‚º3,000 = room-type base price, RevPAR â‚º666.67. `by-channel`/`by-room`/`by-day` totals match `daily_revenue` sums (SUM room_revenue_cents = 1,200,000 cents, extras = 30,000 cents).
 
-## 8. Tests (README Â§16) — [P1] *(hms-tests crate added; 8 tests green — commit `36e2a17`)*
+## 8. Tests (README §16) — [P1] *(hms-tests crate added; 8 tests green — commit `c2f5c21`)*
 
 - [x] Permission matrix test: every role Ã— every permission matches §6 (`crates/hms-tests/tests/roles_matrix.rs` — matrices written BY HAND from §6 so no drift; wire-name round-trip; housekeeping masking invariant). 3 tests green.
 - [x] Tenant isolation test: hotel A can never read/write hotel B (`db_guards.rs::tenant_isolation_rls_hides_and_blocks_other_hotels`) — connects as the REAL RLS role `hms_app` with `app.hotel_id`: own room visible, hotel B ops row invisible, cross-tenant UPDATE affects 0 rows (USING), cross-tenant INSERT violates WITH CHECK, `app.is_platform_admin` sees both tenants.
