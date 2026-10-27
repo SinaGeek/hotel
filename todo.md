@@ -83,26 +83,29 @@ Legend: **[BLOCKER]** stops everything else Â· **[P0]** critical path Â· **[
 - [x] Channels: per-hotel configurable list, `change_log` entity extended with `channel` (migration `0007`); create restricted to `room_manage`. *TODO (Phase 5+): first-touch seeding should add **missing** standard kinds even when the list is not empty — hotel 4442 currently only has `Direct` from Phase-3 seeding.*
 - [x] **Audit log writer** — `db::write_audit` in every write transaction (who/what/when/old/new). **Verified**: 9 distinct audit row types present after the live run. `GET /audit` read endpoint deferred to Phase 7/10.
 - [x] **`daily_revenue` wired in the same transaction** — `upsert_daily_revenue` on reservation create/edit/cancel; payment ± on record/reverse; folio extras via UPDATE. **Verified via psql**: room 202 rows for Nov 1–3 = 300000 room + 10000 extra revenue, occupied=t; payment day 2026-10-27 net 0 after reversal.
-- [ ] OpenAPI + TS type generation — **moved to Phase 5** (needed before wiring `apps/web` to real API types).
+- [ ] OpenAPI + TS type generation — **still open**: Phase 5 ships hand-mirrored types (`apps/web/src/types/generated/api.ts`); codegen pending (Phase 12)
 - [x] Status naming aligned: `ReservationStatus::ConflictNeedsReassignment` serializes to `conflict` (README §9 wording); cleanliness model = README's 4 states + `out_of_order` (kept; site-2 discrepancy documented in the inventory doc).
 
 **Verification setup (dev):** server runs with `DATABASE_URL=postgres://postgres:postgres@localhost:5432/hms`, `ADMIN_BOOTSTRAP_PASSWORD`, `SESSION_SECRET` set; logins: hotel 0 admin, hotel 4442 test users `mtest` (manager) / `h1` (housekeeping) with Argon2 hashes and first-login forced password change. Live test data: room 202 reservation `01a17e15-6971-763c-95d7-d345ef4e2f34` (checked_out), payment+reversal, minibar folio, room 101 cleanliness=cleaning.
 
 **Known follow-ups:** (1) the server currently connects as superuser `postgres`, so RLS is BYPASSED at app level; production must connect as the non-superuser `hms_app` (RLS itself verified in Phase 3) — wire this in Phase 10 hardening and document in README §14. (2) Board seasonal price & per-room rate fall back to the room-type base price when no rule matches (rules take precedence via `date_from DESC LIMIT 1`). (3) `PATCH /guests/{id}` is a stub until guest edit is needed. (4) `channels` first-touch seeding only seeds when the list is empty (see above).
 
-## 5. Web app (README Â§3, Â§4, Â§5) â€” [P0] *(does not exist yet)*
+## 5. Web app (README Â§3, Â§4, Â§5) â€” [P0] *(core done & live-verified; commit `6eb4b6e`; UI is ENGLISH-ONLY per user decision)*
 
-- [ ] Scaffold React + Vite + TypeScript SPA (static, no Next.js server features â€” required for desktop embedding) â€” decide location: `apps/web` (README) vs `frontend/` (current empty dir)
-- [ ] `pnpm` project files, ESLint, VS Code config (README Â§3)
-- [ ] API client layer from generated types (`src/api/`)
-- [ ] **Room calendar / resource timeline board** (rooms as rows, dates as columns) â€” the centerpiece UI
-- [ ] Pages: reservations list/detail/create/edit, guests, rooms & room types, housekeeping board (cleanliness only), users/roles, payments/folio, settings
-- [ ] Reports pages with charts (ECharts or Recharts): earnings by channel/day/month/room, occupancy, ADR, RevPAR â€” with date-range filter and CSV/PDF export
-- [ ] **i18n: Turkish + English** (`src/i18n/`), TRY + other currencies
-- [ ] Role-aware UI: hide what a user may not do (housekeeping sees room board only â€” no names, prices, payments)
+- [x] Scaffold React + Vite + TypeScript SPA (static, no Next.js server features â€” required for desktop embedding) â€” located at `apps/web` (README layout)
+- [x] `pnpm` project files, ESLint (README Â§3); VS Code config inherited from workspace root
+- [x] API client layer (`src/api/client.ts`) â€” **hand-mirrored wire types** in `src/types/generated/api.ts` (ts-rs/OpenAPI codegen still open, see below); token session in localStorage, 401 â†’ drop session; `sessionHasPermission` helper
+- [x] **Room calendar / resource timeline board** (`src/pages/Board.tsx`) â€” rooms as rows, dates as columns, CSS grid **explicit placement, stays span their nights** (`gridColumn: n / span m` â€” verified 3-night stay = 138px vs 42px single night); header shows `available/total` + cheapest price; click empty cell â†’ create-reservation modal; click stay â†’ detail modal with check-in/out/cancel, payments (+refund reversal shown as `-TRY x`), folio. **Live-verified end-to-end as manager**: create â†’ check-in â†’ record TRY 3,000 cash â†’ folio minibar TRY 150 â†’ refund â†’ check-out, all through the UI.
+- [x] Pages: reservations list (`Reservations.tsx`, keyset pagination "more"), guests (search/create), rooms & cleanliness dropdown (PATCH verified 200), users list/create, payments/folio inside board detail modal
+- [ ] Reports pages with charts (ECharts or Recharts): earnings by channel/day/month/room, occupancy, ADR, RevPAR â€” with date-range filter and CSV/PDF export *(Phase 7 â€” reads `daily_revenue`)*
+- [x] **i18n: English-only** (`src/i18n/`) â€” per user decision overrides README's TR requirement; no Turkish literals in `apps/web` (grep-verified pre-commit). Multi-language structure kept for later.
+- [x] Role-aware UI â€” AppShell hides nav by permission (housekeeping sees only Dashboard/Room board/Housekeeping); board masks guest names/prices to `â—` for housekeeping; housekeeping server responses contain no names. **Live-verified as `h1`.** Housekeeping-cleanliness page = same Rooms page with select when permitted.
 - [ ] Mobile-friendly responsive layout (Â§4)
-- [ ] Login page (hotel ID + username + password) and forced password-change flow
-- [ ] Style match to app.hmsflow.com (layout, navigation, colors, component style)
+- [x] Login page (hotel ID + username + password) and forced password-change flow (`ChangePassword.tsx` re-logins to clear fpc flag); server refresh-endpoint bug fixed (`auth.rs`: refresh kept issuing `fpc=false` tokens)
+- [ ] Style match to app.hmsflow.com (layout, navigation, colors, component style) â€” clean custom CSS now, cosmetic pass later
+- [ ] OpenAPI/ts-rs TS type generation (moved here from Phase 4, then Phase 12 polish) â€” still TODO; types are hand-mirrored, watch for drift
+- [ ] Board re-fetch storm fix note: `useCallback` deps held a fresh-object session; fixed with a `sessionRef` (committed) â€” pattern to copy in other pages
+- [ ] Dev-infra note: vite **dev** server on 5173 intermittently 502s through the automation-browser proxy â†’ **browser testing uses `pnpm preview` on 4173** (`vite.config.ts` preview proxy `/api` â†’ `:8080`, commit `6eb4b6e`)
 
 ## 6. Offline desktop app + sync (README Â§11) â€” [P1]
 
