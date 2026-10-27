@@ -5,7 +5,9 @@ import type {
   ApiResponse,
   BoardResponse,
   ChannelDto,
+  ChannelRevenue,
   CreateReservationBody,
+  DayReport,
   FolioDto,
   GuestDto,
   HotelDto,
@@ -16,8 +18,10 @@ import type {
   ReservationListQuery,
   RoleMatrix,
   RoomDto,
+  RoomRevenue,
   RoomTypeDto,
   SessionUser,
+  SummaryReport,
   UserDto,
 } from '../types/generated/api'
 
@@ -138,4 +142,10 @@ export const api = {
 
   // ---------------------------------------------------------------- board
   board: (from: string, to: string) => request<BoardResponse>('/board', { query: { from, to } }),
+
+  // ---------------------------------------------------------------- reports
+  reportSummary: (from: string, to: string) => request<SummaryReport>('/reports/summary', { query: { from, to } }),
+  reportsByChannel: (from: string, to: string) => request<ChannelRevenue[]>('/reports/by-channel', { query: { from, to } }),
+  reportsByDay: (from: string, to: string) => request<DayReport[]>('/reports/by-day', { query: { from, to } }),
+  reportsByRoom: (from: string, to: string) => request<RoomRevenue[]>('/reports/by-room', { query: { from, to } }),
 }

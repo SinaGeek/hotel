@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '../api/auth'
 import { sessionHasPermission } from '../api/client'
 
+
 // Role-aware nav (README §4/§6): housekeeping only sees rooms/housekeeping.
 export function AppShell() {
   const { t } = useTranslation()
@@ -19,6 +20,7 @@ export function AppShell() {
     { to: '/reservations', label: t('nav.reservations'), show: can('reservation_view') && !isHk },
     { to: '/guests', label: t('nav.guests'), show: can('reservation_view') && !isHk },
     { to: '/rooms', label: isHk ? t('nav.housekeeping') : t('nav.rooms'), show: true },
+    { to: '/reports', label: t('reports.title'), show: sessionHasPermission(session, 'report_view_tenant') },
     { to: '/users', label: t('nav.users'), show: can('user_view') },
   ]
 

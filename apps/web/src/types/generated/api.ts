@@ -178,6 +178,48 @@ export interface FolioDto {
   created_at: string
 }
 
+// ---------------------------------------------------------------- reports
+export interface SummaryReport {
+  from: string
+  to: string
+  currency: string
+  room_revenue_cents: number
+  extra_revenue_cents: number
+  payments_collected_cents: number
+  occupied_nights: number
+  available_room_nights: number
+  occupancy_pct: number
+  adr_cents: number | null
+  revpar_cents: number | null
+}
+
+export interface ChannelRevenue {
+  channel_id: string
+  channel_name: string
+  kind: string
+  room_revenue_cents: number
+  extra_revenue_cents: number
+  payments_collected_cents: number
+  occupied_nights: number
+}
+
+export interface DayReport {
+  date: string
+  room_revenue_cents: number
+  extra_revenue_cents: number
+  payments_collected_cents: number
+  occupied_nights: number
+}
+
+export interface RoomRevenue {
+  room_id: string
+  room_number: string
+  room_type_name: string
+  room_revenue_cents: number
+  extra_revenue_cents: number
+  occupied_nights: number
+}
+
 // ---------------------------------------------------------------- board
 export interface BoardStay {
   reservation_id: string

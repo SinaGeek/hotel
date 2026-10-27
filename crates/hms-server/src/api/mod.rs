@@ -3,6 +3,7 @@ pub mod guests;
 pub mod hotels;
 pub mod payments;
 pub mod price_rules;
+pub mod reports;
 pub mod reservations;
 pub mod roles;
 pub mod rooms;
@@ -54,4 +55,5 @@ pub fn router() -> axum::Router<crate::AppState> {
         .nest("/price-rules", price_rules::router())
         .nest("/channels", channels::router())
         .nest("/board", reservations::board_router())
+        .nest("/reports", reports::router())
 }
