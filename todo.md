@@ -107,6 +107,21 @@ Legend: **[BLOCKER]** stops everything else Â· **[P0]** critical path Â· **[
 - [ ] Board re-fetch storm fix note: `useCallback` deps held a fresh-object session; fixed with a `sessionRef` (committed) â€” pattern to copy in other pages
 - [ ] Dev-infra note: vite **dev** server on 5173 intermittently 502s through the automation-browser proxy â†’ **browser testing uses `pnpm preview` on 4173** (`vite.config.ts` preview proxy `/api` â†’ `:8080`, commit `6eb4b6e`)
 
+## 5b. Web UI parity with the reference app (app.hmsflow.com) — [P1] *(new 2026-10-28; source: REA live captures, see `docs/ui-reference.md` + `docs/apis.md`)*
+
+Goal: restyle/extend `apps/web` to match the reference hotel app's frame and patterns, module by module, using the same server APIs we already have. English-only UI (established decision); the reference is TR in places (e.g. "%76", "Tek Kisilik") — we render English.
+
+- [ ] **5b.1 Shell + design system**: dark icon/label sidebar (Dashboard, Monthly Room, Guests, Bookings >, Facility >, Transactions >, Periodic Prices >, Reports, Invoices >, Agencies &, Tools >; Help at bottom, collapse control) with active pill + left accent bar; header with hotel name + Hotel Code, bell, language menu, dark-theme toggle, user menu; violet primary buttons; round + FAB; white cards with uppercase table headers; soft status pills; list footer (`1-20 / 86`, per-page select, first/prev/next/last). Shared components: `<CardTable>`, `<ListFooter>`, `<FilterBar>`, `<StatusPill>`, `<PageHeader>`; token file for colors.
+- [ ] **5b.2 Monthly Room** (upgrade `Board.tsx`): Calendar/List views; 7 days / 15 days / Month range toggle + pager (Today disabled on current period); per-room-type price header rows; grouped room rows; green (direct) vs gold (channel) booking bars with "n nights - Channel" subtitle; legend row (Reservation, Pending, Blocked, Out of Service + Clean/Dirty); drag across empty days to create; click bar -> booking detail (existing modal).
+- [ ] **5b.3 Dashboard**: suggestion/search row, status chips with counts (Departing Today/Tomorrow, Long Term, Will Check-in, Out of Service, Dirty Room), room-card grid (number header colored by state, guest/type name, checkout time, "Make Reservation" on vacant), stat cards (Occupied, Guests Today, Vacant, Total).
+- [ ] **5b.4 List-page framework + Bookings + Guests**: tabs (Active/Upcoming/Archive/Cancelled/All) mapped to `status=1&checkoutIsNullOrZero`-style server filters; Guests with Download (CSV export), Birthday/Garage quick views (hide if data doesn't support them), category/country filters.
+- [ ] **5b.5 Facility module**: Rooms, Room Type, Accommodation Type, Facilities, Update Status (inline cleanliness dropdowns), Housekeeping (building/status filters) — we already have rooms + room-types + housekeeping APIs.
+- [ ] **5b.6 Reports hub + core reports**: card-grid hub grouped by category (Daily/Bookings/Rooms & Rates/Guests/Finance); implement the Daily set first as table+chart tabs with date picker + Download (CSV): Occupancy Forecast (per-date arrivals/occupied/vacant/occupancy %), In-House (KPI cards + rows), Main Courante; others follow Phase 7 report APIs.
+- [ ] **5b.7 Channel-manager surfaces** (static-first): Channels list (logo/code/status, "In periodic pricing" filter) from the `channels` table; Periodic Calendar availability grid + rates grid (editable cells, Enter-to-save) using channel/price-rule endpoints. Bulk/batch update screens only if sync scope needs them.
+- [ ] **5b.8 Deferred-module placeholders** (out of scope per README §4 deferral): Invoices, Transactions (Expense/Stock/Open Sale), Agencies & Accounts, Tools (Settings, Exchange, Staff, Applications) — decision: hide from sidebar for our roles, or thin disabled placeholders.
+- [ ] **5b.9 Verify**: `pnpm preview` against a live server, side-by-side screenshot pass (our page vs the reference capture) per module; English-only grep for Turkish diacritics returns 0; commit + stage review.
+- Note: capture lesson — `/channel-bookings` on the REFERENCE threw its own error boundary; keep our shell on route errors unchanged.
+
 ## 6. Offline desktop app + sync (README Â§11) â€” [P1]
 
 - [ ] Create `crates/hms-sync` (client sync engine: outbox, pull cursor, retry) â€” **crate does not exist**
