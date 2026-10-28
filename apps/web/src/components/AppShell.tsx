@@ -23,6 +23,7 @@ const EXPAND_FOR: Record<string, string> = {
   '/rooms': 'facility',
   '/housekeeping': 'facility',
   '/users': 'tools',
+  '/channels': 'tools',
 }
 
 export function AppShell() {
@@ -82,7 +83,10 @@ export function AppShell() {
       label: 'nav.tools',
       icon: <IconGear />,
       show: can('user_view'),
-      items: [{ key: 'staff', label: 'nav.staff', to: '/users', show: can('user_view') }],
+      items: [
+        { key: 'staff', label: 'nav.staff', to: '/users', show: can('user_view') },
+        { key: 'channels', label: 'nav.channels', to: '/channels', show: !isHk },
+      ],
     },
   ]
   const singles: Single[] = [
