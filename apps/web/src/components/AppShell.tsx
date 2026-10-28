@@ -17,6 +17,12 @@ interface Group { key: string; label: string; icon: ReactNode; items: Item[]; sh
 interface Single { key: string; label: string; to: string; icon: ReactNode; show: boolean; end?: boolean }
 
 const THEME_KEY = 'hms.theme'
+// Deferred reference-module groups (todo 5b.8, README §4 deferral) are kept
+// OUT of the sidebar on purpose — Invoices / Transactions (Expense-Stock /
+// Open Sale) / Periodic Prices / Agencies & Accounts and the Tools extras
+// (Settings, Currency Exchange, Applications) have no backing data model
+// (no invoice numbering, agency balances, stock, exchange ledgers, SMTP/SMS
+// config). Do not re-add them until Phase 7 adds those tables.
 const EXPAND_FOR: Record<string, string> = {
   // routes that belong to an expander group -> group key
   '/reservations': 'bookings',
