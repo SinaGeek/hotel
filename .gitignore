@@ -18,6 +18,7 @@ apps/web/dist/
 # Captured reference-site artifacts (may contain data, keep out of history)
 *.min.js.bak
 *.http
+/screenshots/
 
 # Editor / OS
 .vscode/*
