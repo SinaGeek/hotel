@@ -36,6 +36,7 @@ use hms_core::sync::{
 };
 use hms_core::ApiResponse;
 use serde::Deserialize;
+use std::sync::OnceLock;
 use uuid::Uuid;
 
 use super::{ApiError, AResult};
@@ -47,6 +48,31 @@ pub fn router() -> Router<AppState> {
     Router::new().route("/push", post(push)).route("/pull", get(pull))
 }
 
+/// Oldest client sync protocol still accepted (README §15
+/// SYNC_PROTOCOL_MIN_VERSION). Read once at first use; 0 (the default when the
+/// env var is unset) accepts every client. Operators raise it to force stale
+/// desktop builds in the field to upgrade.
+fn min_protocol_version() -> u32 {
+    static MIN: OnceLock<u32> = OnceLock::new();
+    *MIN.get_or_init(|| {
+        std::env::var("SYNC_PROTOCOL_MIN_VERSION")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap_or(0)
+    })
+}
+
+fn protocol_gate(client_version: u32) -> Result<(), ApiError> {
+    let min = min_protocol_version();
+    if client_version < min {
+        return Err(ApiError(
+            StatusCode::UPGRADE_REQUIRED,
+            format!("sync protocol version {client_version} is too old (minimum {min}); update the desktop app"),
+        ));
+    }
+    Ok(())
+}
+
 // ----------------------------------------------------------------------- pull
 
 #[derive(Deserialize)]
@@ -54,6 +80,8 @@ pub struct PullQuery {
     pub since: i64,
     /// page size, default 500, max 2000 (clients loop via has_more)
     pub limit: Option<i64>,
+    /// client sync protocol version (untagged older clients count as v1)
+    pub v: Option<u32>,
 }
 
 /// change_log entity strings -> protocol enum ('hotel' rows are filtered in SQL
@@ -71,6 +99,7 @@ async fn pull(
     auth: AuthUser,
     Query(q): Query<PullQuery>,
 ) -> AResult<Json<ApiResponse<SyncPullResponse>>> {
+    protocol_gate(q.v.unwrap_or(1))?;
     let limit = q.limit.unwrap_or(500).clamp(1, 2000);
 
     let latest: i64 = sqlx::query_scalar(
@@ -132,6 +161,7 @@ async fn push(
     auth: AuthUser,
     Json(req): Json<SyncPushRequest>,
 ) -> AResult<Json<ApiResponse<SyncPushResponse>>> {
+    protocol_gate(if req.protocol_version == 0 { 1 } else { req.protocol_version })?;
     if req.hotel_id != auth.hotel_id {
         return Err(ApiError(StatusCode::FORBIDDEN, "operations belong to another hotel".into()));
     }

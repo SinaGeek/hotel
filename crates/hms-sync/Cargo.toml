@@ -1,0 +1,16 @@
+[package]
+name = "hms-sync"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hms-core = { path = "../hms-core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.10", features = ["v7", "v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[dev-dependencies]
+tokio = { version = "1.40", features = ["macros", "rt"] }

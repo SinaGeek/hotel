@@ -876,6 +876,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hms-sync"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "hms-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "hms-tests"
 version = "0.1.0"
 dependencies = [

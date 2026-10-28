@@ -3,6 +3,7 @@ members = [
     "crates/hms-core",
     "crates/hms-server",
     "crates/hms-tests",
+    "crates/hms-sync",
     "apps/desktop/src-tauri"
 ]
 resolver = "2"
