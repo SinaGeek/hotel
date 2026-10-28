@@ -10,6 +10,7 @@ import { Rooms } from './pages/Rooms'
 import { Housekeeping } from './pages/Housekeeping'
 import { Users } from './pages/Users'
 import { Reports } from './pages/Reports'
+import { ReportsHub, ReportsForecast, ReportsInhouse, ReportsMainCourante } from './pages/ReportPages'
 import { useAuth } from './api/auth'
 
 export default function App() {
@@ -35,7 +36,11 @@ export default function App() {
         <Route path="/rooms" element={<Rooms />} />
         <Route path="/housekeeping" element={<Housekeeping />} />
         <Route path="/users" element={<Users />} />
-        <Route path="/reports" element={<Reports />} />
+        <Route path="/reports" element={<ReportsHub />} />
+        <Route path="/reports/analysis" element={<Reports />} />
+        <Route path="/reports/forecast" element={<ReportsForecast />} />
+        <Route path="/reports/inhouse" element={<ReportsInhouse />} />
+        <Route path="/reports/maincourante" element={<ReportsMainCourante />} />
       </Route>
     </Routes>
   )

@@ -249,6 +249,60 @@ export interface BoardDay {
   from_price_cents: number | null
 }
 
+// ------------------------------------------------------------------ 5b.6 Daily reports
+export interface ForecastRow {
+  date: string
+  arrivals: number
+  occupied: number
+  vacant: number
+  guests: number
+  occupancy_pct: number
+}
+
+export interface InhouseRow {
+  reservation_id: string
+  guest_name: string | null
+  room_number: string
+  room_type_name: string
+  checkin_date: string
+  checkout_date: string
+  guests: number
+  balance_cents: number
+  day_rate_cents: number | null
+  currency: string
+}
+
+export interface InhouseReport {
+  date: string
+  currency: string
+  bookings: number
+  adults: number
+  children: number
+  room_rate_cents: number
+  balance_cents: number
+  rows: InhouseRow[]
+}
+
+export interface MainCouranteRow {
+  reservation_id: string
+  guest_name: string | null
+  room_number: string
+  checkin_date: string
+  checkout_date: string
+  daily_rate_cents: number | null
+  room_rate_cents: number
+  previous_balance_cents: number
+  balance_cents: number
+  currency: string
+  status: string
+}
+
+export interface MainCouranteReport {
+  date: string
+  count: number
+  rows: MainCouranteRow[]
+}
+
 export interface BoardResponse {
   from: string
   to: string

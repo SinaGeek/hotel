@@ -16,6 +16,9 @@ pub fn router() -> Router<AppState> {
         .route("/by-channel", get(by_channel))
         .route("/by-day", get(by_day))
         .route("/by-room", get(by_room))
+        .route("/forecast", get(forecast))
+        .route("/inhouse", get(inhouse))
+        .route("/maincourante", get(maincourante))
 }
 
 #[derive(Deserialize)]
@@ -258,4 +261,281 @@ async fn by_room(
     .await
     .map_err(ApiError::from)?;
     Ok(Json(ApiResponse { success: true, data: rows, error: None }))
+}
+
+// ------------------------------------------------------------------------- 5b.6 Daily set
+// Occupancy Forecast (per-date arrivals/occupied/vacant/guests/%), In-House
+// list with balances, Main Courante (per-date business diary). These read raw
+// reservations + payments (the daily_revenue aggregate has no per-stay
+// granularity), matching the reference /reports/* pages 1:1 where the data
+// model allows.
+
+#[derive(Deserialize)]
+pub struct ForecastQuery {
+    pub start: chrono::NaiveDate,
+    /// number of days to show (default 15, max 90)
+    pub days: Option<i64>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct ForecastRow {
+    pub date: chrono::NaiveDate,
+    /// confirmed + checked-in stays starting that day
+    pub arrivals: i64,
+    /// stays covering the day: checkin <= date < checkout
+    pub occupied: i64,
+    /// rentable rooms minus occupied
+    pub vacant: i64,
+    /// adults + children of the stays covering the day
+    pub guests: i64,
+    pub occupancy_pct: f64,
+}
+
+async fn forecast(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Query(q): Query<ForecastQuery>,
+) -> AResult<Json<ApiResponse<Vec<ForecastRow>>>> {
+    require_report_view(&state, &auth).await?;
+    let days = q.days.unwrap_or(15);
+    if !(1..=90).contains(&days) {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "days must be 1..=90".into()));
+    }
+    let rooms = room_count(&state.db, auth.hotel_id).await.map_err(ApiError::from)?;
+    let rows: Vec<ForecastRow> = sqlx::query_as(
+        r#"
+        WITH days AS (
+            SELECT generate_series($2::date, $2::date + ($3::int - 1), '1 day'::interval)::date AS d
+        )
+        SELECT days.d AS date,
+               (SELECT count(*) FROM reservations res
+                WHERE res.hotel_id = $1 AND res.deleted_at IS NULL
+                  AND res.status IN ('confirmed','checked_in')
+                  AND res.checkin_date = days.d) AS arrivals,
+               (SELECT count(*) FROM reservations res
+                WHERE res.hotel_id = $1 AND res.deleted_at IS NULL
+                  AND res.status IN ('confirmed','checked_in')
+                  AND res.checkin_date <= days.d AND res.checkout_date > days.d) AS occupied,
+               $4::bigint - (SELECT count(*) FROM reservations res
+                WHERE res.hotel_id = $1 AND res.deleted_at IS NULL
+                  AND res.status IN ('confirmed','checked_in')
+                  AND res.checkin_date <= days.d AND res.checkout_date > days.d) AS vacant,
+               COALESCE((SELECT sum(res.adults + res.children) FROM reservations res
+                WHERE res.hotel_id = $1 AND res.deleted_at IS NULL
+                  AND res.status IN ('confirmed','checked_in')
+                  AND res.checkin_date <= days.d AND res.checkout_date > days.d), 0)::bigint AS guests,
+               CASE WHEN $4::bigint > 0
+                    THEN 100.0 * (SELECT count(*) FROM reservations res
+                                  WHERE res.hotel_id = $1 AND res.deleted_at IS NULL
+                                    AND res.status IN ('confirmed','checked_in')
+                                    AND res.checkin_date <= days.d AND res.checkout_date > days.d)::float8 / $4::bigint
+                    ELSE 0.0 END AS occupancy_pct
+        FROM days
+        ORDER BY days.d
+        "#,
+    )
+    .bind(auth.hotel_id)
+    .bind(q.start)
+    .bind(days)
+    .bind(rooms)
+    .fetch_all(&state.db)
+    .await
+    .map_err(ApiError::from)?;
+    Ok(Json(ApiResponse { success: true, data: rows, error: None }))
+}
+
+#[derive(Deserialize)]
+pub struct StayDateQuery {
+    pub date: chrono::NaiveDate,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct InhouseRow {
+    pub reservation_id: uuid::Uuid,
+    pub guest_name: Option<String>,
+    pub room_number: String,
+    pub room_type_name: String,
+    pub checkin_date: chrono::NaiveDate,
+    pub checkout_date: chrono::NaiveDate,
+    pub guests: i64,
+    /// total price minus payments recorded up to AND on the date
+    pub balance_cents: i64,
+    /// the stay's per-night rate for the selected date
+    pub day_rate_cents: Option<i64>,
+    pub currency: String,
+}
+
+#[derive(Serialize)]
+pub struct InhouseReport {
+    pub date: chrono::NaiveDate,
+    pub currency: String,
+    pub bookings: i64,
+    pub adults: i64,
+    pub children: i64,
+    /// sum of the day rates of the in-house stays for this date
+    pub room_rate_cents: i64,
+    /// sum of row balances
+    pub balance_cents: i64,
+    pub rows: Vec<InhouseRow>,
+}
+
+async fn inhouse(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Query(q): Query<StayDateQuery>,
+) -> AResult<Json<ApiResponse<InhouseReport>>> {
+    require_report_view(&state, &auth).await?;
+    let rows: Vec<InhouseRow> = sqlx::query_as(
+        r#"
+        SELECT res.id AS reservation_id,
+               g.full_name AS guest_name,
+               r.room_number,
+               rt.name AS room_type_name,
+               res.checkin_date,
+               res.checkout_date,
+               (res.adults + res.children)::bigint AS guests,
+               (res.total_price_cents - COALESCE(
+                   (SELECT sum(p.amount_cents)::bigint FROM payments p
+                    WHERE p.reservation_id = res.id AND p.created_at::date <= $2), 0)) AS balance_cents,
+               COALESCE(
+                   (SELECT (e->>'price_cents')::bigint
+                    FROM jsonb_array_elements(res.daily_rates) e
+                    WHERE e->>'date' = $2::text
+                    LIMIT 1),
+                   (res.total_price_cents::numeric / GREATEST((res.checkout_date - res.checkin_date), 1)))::bigint AS day_rate_cents,
+               res.currency
+        FROM reservations res
+        JOIN rooms r ON r.id = res.room_id
+        JOIN room_types rt ON rt.id = r.room_type_id
+        LEFT JOIN guests g ON g.id = res.guest_id
+        WHERE res.hotel_id = $1 AND res.deleted_at IS NULL
+          AND res.status IN ('confirmed','checked_in')
+          AND res.checkin_date <= $2 AND res.checkout_date > $2
+        ORDER BY r.room_number
+        "#,
+    )
+    .bind(auth.hotel_id)
+    .bind(q.date)
+    .fetch_all(&state.db)
+    .await
+    .map_err(ApiError::from)?;
+
+    let adults: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(sum(adults),0)::bigint FROM reservations res
+         WHERE res.hotel_id = $1 AND res.deleted_at IS NULL AND res.status IN ('confirmed','checked_in')
+           AND res.checkin_date <= $2 AND res.checkout_date > $2",
+    )
+    .bind(auth.hotel_id)
+    .bind(q.date)
+    .fetch_one(&state.db)
+    .await
+    .map_err(ApiError::from)?;
+    let children: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(sum(children),0)::bigint FROM reservations res
+         WHERE res.hotel_id = $1 AND res.deleted_at IS NULL AND res.status IN ('confirmed','checked_in')
+           AND res.checkin_date <= $2 AND res.checkout_date > $2",
+    )
+    .bind(auth.hotel_id)
+    .bind(q.date)
+    .fetch_one(&state.db)
+    .await
+    .map_err(ApiError::from)?;
+    let currency: String = sqlx::query_scalar("SELECT default_currency FROM hotels WHERE id = $1")
+        .bind(auth.hotel_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(ApiError::from)?;
+
+    let room_rate_cents: i64 = rows.iter().map(|r| r.day_rate_cents.unwrap_or(0)).sum();
+    let balance_cents: i64 = rows.iter().map(|r| r.balance_cents).sum();
+    let bookings = rows.len() as i64;
+    Ok(Json(ApiResponse {
+        success: true,
+        data: InhouseReport { date: q.date, currency, bookings, adults, children, room_rate_cents, balance_cents, rows },
+        error: None,
+    }))
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct MainCouranteRow {
+    pub reservation_id: uuid::Uuid,
+    pub guest_name: Option<String>,
+    pub room_number: String,
+    pub checkin_date: chrono::NaiveDate,
+    pub checkout_date: chrono::NaiveDate,
+    /// the stay's per-night rate for the selected date
+    pub daily_rate_cents: Option<i64>,
+    /// room-type list rate for the date (price rule in effect, else base)
+    pub room_rate_cents: i64,
+    /// total price minus payments recorded before the date
+    pub previous_balance_cents: i64,
+    /// total price minus payments recorded up to AND on the date
+    pub balance_cents: i64,
+    pub currency: String,
+    pub status: String,
+}
+
+#[derive(Serialize)]
+pub struct MainCouranteReport {
+    pub date: chrono::NaiveDate,
+    pub count: i64,
+    pub rows: Vec<MainCouranteRow>,
+}
+
+async fn maincourante(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Query(q): Query<StayDateQuery>,
+) -> AResult<Json<ApiResponse<MainCouranteReport>>> {
+    require_report_view(&state, &auth).await?;
+    let rows: Vec<MainCouranteRow> = sqlx::query_as(
+        r#"
+        SELECT res.id AS reservation_id,
+               g.full_name AS guest_name,
+               r.room_number,
+               res.checkin_date,
+               res.checkout_date,
+               COALESCE(
+                   (SELECT (e->>'price_cents')::bigint
+                    FROM jsonb_array_elements(res.daily_rates) e
+                    WHERE e->>'date' = $2::text
+                    LIMIT 1),
+                   (res.total_price_cents::numeric / GREATEST((res.checkout_date - res.checkin_date), 1)))::bigint AS daily_rate_cents,
+               COALESCE(NULLIF(
+                   (SELECT pr.price_cents FROM price_rules pr
+                    WHERE pr.hotel_id = res.hotel_id AND pr.room_type_id = rt.id AND pr.deleted_at IS NULL
+                      AND pr.date_from <= $2 AND pr.date_to >= $2
+                    ORDER BY pr.date_from DESC LIMIT 1), 0),
+                   rt.base_price_cents) AS room_rate_cents,
+               (res.total_price_cents - COALESCE(
+                   (SELECT sum(p.amount_cents)::bigint FROM payments p
+                    WHERE p.reservation_id = res.id AND p.created_at::date < $2), 0)) AS previous_balance_cents,
+               (res.total_price_cents - COALESCE(
+                   (SELECT sum(p.amount_cents)::bigint FROM payments p
+                    WHERE p.reservation_id = res.id AND p.created_at::date <= $2), 0)) AS balance_cents,
+               res.currency,
+               res.status
+        FROM reservations res
+        JOIN rooms r ON r.id = res.room_id
+        JOIN room_types rt ON rt.id = r.room_type_id
+        LEFT JOIN guests g ON g.id = res.guest_id
+        WHERE res.hotel_id = $1 AND res.deleted_at IS NULL
+          AND res.status IN ('confirmed','checked_in')
+          AND (  (res.checkin_date <= $2 AND res.checkout_date > $2)   -- covering the night
+              OR (res.checkin_date = $2)                              -- arriving today
+              OR (res.checkout_date = $2) )                           -- leaving today
+        ORDER BY r.room_number
+        "#,
+    )
+    .bind(auth.hotel_id)
+    .bind(q.date)
+    .fetch_all(&state.db)
+    .await
+    .map_err(ApiError::from)?;
+    let count = rows.len() as i64;
+    Ok(Json(ApiResponse {
+        success: true,
+        data: MainCouranteReport { date: q.date, count, rows },
+        error: None,
+    }))
 }

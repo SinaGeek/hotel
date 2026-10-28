@@ -21,6 +21,9 @@ import type {
   RoomRevenue,
   RoomTypeDto,
   SessionUser,
+  ForecastRow,
+  InhouseReport,
+  MainCouranteReport,
   SummaryReport,
   UserDto,
 } from '../types/generated/api'
@@ -149,4 +152,9 @@ export const api = {
   reportsByChannel: (from: string, to: string) => request<ChannelRevenue[]>('/reports/by-channel', { query: { from, to } }),
   reportsByDay: (from: string, to: string) => request<DayReport[]>('/reports/by-day', { query: { from, to } }),
   reportsByRoom: (from: string, to: string) => request<RoomRevenue[]>('/reports/by-room', { query: { from, to } }),
+  // Daily set (5b.6): per-date occupancy forecast and per-date stays/balances
+  reportForecast: (start: string, days?: number) =>
+    request<ForecastRow[]>('/reports/forecast', { query: days == null ? { start } : { start, days } }),
+  reportInhouse: (date: string) => request<InhouseReport>('/reports/inhouse', { query: { date } }),
+  reportMaincourante: (date: string) => request<MainCouranteReport>('/reports/maincourante', { query: { date } }),
 }
