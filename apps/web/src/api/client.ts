@@ -92,8 +92,10 @@ export function sessionHasPermission(session: Session | null, perm: string): boo
 
 export const api = {
   // ---------------------------------------------------------------- auth
-  login: (hotelId: number, username: string, password: string) =>
-    request<LoginResponse>('/auth/login', { method: 'POST', body: { hotel_id: hotelId, username, password } }),
+  // `offline` is set by the desktop webview (README §11.7) so the response
+  // carries the argon2 verifier for the native shell's offline login cache.
+  login: (hotelId: number, username: string, password: string, offline = false) =>
+    request<LoginResponse>('/auth/login', { method: 'POST', body: { hotel_id: hotelId, username, password, ...(offline ? { offline: true } : {}) } }),
   changePassword: (oldPassword: string, newPassword: string) =>
     request<null>('/auth/change-password', { method: 'POST', body: { old_password: oldPassword, new_password: newPassword } }),
   logout: () => request<null>('/auth/logout', { method: 'POST' }),

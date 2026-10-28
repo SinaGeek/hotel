@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
 import { useAuth } from '../api/auth'
+import { desktop, isDesktop } from '../api/desktop'
 
 export function Login() {
   const { t } = useTranslation()
@@ -19,8 +20,23 @@ export function Login() {
     setBusy(true)
     setError(null)
     try {
-      const res = await api.login(Number(hotelId), username, password)
+      // Desktop asks for the offline verifier and hands token + credentials
+      // to the native shell so the background sync worker starts (README 11).
+      const res = await api.login(Number(hotelId), username, password, isDesktop)
       auth.signIn({ token: res.token, user: res.user, permissions: res.permissions })
+      if (isDesktop) {
+        try {
+          await desktop.setAuthToken(res.token, Number(hotelId))
+          if (res.offline_verifier) {
+            await desktop.rememberOfflineCredentials(
+              res.user.user_id, Number(hotelId), username, res.offline_verifier, res.user.role,
+            )
+          }
+        } catch (bridgeError) {
+          // the native bridge must never block a successful REST login
+          console.warn('desktop bridge:', bridgeError)
+        }
+      }
       navigate(res.user.force_password_change ? '/change-password' : '/')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

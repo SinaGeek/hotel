@@ -12,6 +12,8 @@ export interface LoginRequest {
   hotel_id: number
   username: string
   password: string
+  /** Desktop webview only (README 11.7): asks for the offline verifier. */
+  offline?: boolean
 }
 
 export interface SessionUser {
@@ -27,6 +29,8 @@ export interface LoginResponse {
   token: string
   user: SessionUser
   permissions: string[]
+  /** Present only when the request had offline: true (desktop shell). */
+  offline_verifier?: string | null
 }
 
 // ---------------------------------------------------------------- hotels

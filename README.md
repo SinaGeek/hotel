@@ -293,7 +293,7 @@ CRDTs merge data well but cannot enforce business rules like "one guest per room
 
 ### Offline login
 
-After the last online login, the app caches the password verifier and role permissions. The cache expires after 14 days (configurable). A user deactivated on the server is locked out at the next sync.
+After the last online login, the app caches the password verifier and role permissions. The cache expires after 14 days (configurable). A user deactivated on the server is locked out at the next sync. The desktop webview requests the verifier with `offline: true` in the login body; the server then echoes the argon2 PHC hash in `offline_verifier` (plain browser requests never receive it), and the desktop protects the persisted copy with Windows DPAPI.
 
 ### Versioning and updates
 

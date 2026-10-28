@@ -122,6 +122,11 @@ struct LoginBody {
     hotel_id: i64,
     username: String,
     password: String,
+    /// Set by the desktop webview (README §11.7): the response then carries
+    /// `offline_verifier` so the native shell can cache credentials for
+    /// offline verification. Plain browsers never receive the hash.
+    #[serde(default)]
+    offline: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -129,6 +134,12 @@ struct LoginResponse {
     token: String,
     user: UserDto,
     permissions: Vec<String>,
+    /// The argon2 PHC hash of the just-verified password, ONLY when the
+    /// request stated `offline: true` (desktop). Offline login re-verifies
+    /// the typed password against it once the server is unreachable; the DPAPI
+    /// wrapper on the desktop protects the persisted copy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    offline_verifier: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -210,6 +221,7 @@ async fn login(
                 force_password_change: fpc,
             },
             permissions,
+            offline_verifier: body.offline.then(|| hash.clone()),
         },
         error: None,
     }))

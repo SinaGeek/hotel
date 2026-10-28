@@ -6,6 +6,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../api/auth'
 import { api, sessionHasPermission } from '../api/client'
+import { SyncStatusPill } from './SyncStatus'
 import {
   IconBed, IconBell, IconCalendar, IconChart, IconChevronRight, IconDashboard,
   IconGlobe, IconHotel, IconList, IconLogout, IconMoon, IconPlus, IconSun,
@@ -168,6 +169,7 @@ export function AppShell() {
             <div className="header-sub">{t('shell.hotelCode', { code: hotelCode ?? '' })}</div>
           </div>
           <div className="header-right">
+            <SyncStatusPill />
             <button className="icon-btn" aria-label={t('shell.notifications')} title={t('shell.notifications')}><IconBell /></button>
             <button className="icon-btn" aria-label={t('shell.language')} title={t('shell.language')}><IconGlobe /></button>
             <button
