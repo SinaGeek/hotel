@@ -123,6 +123,7 @@ export const api = {
 
   // ---------------------------------------------------------------- reservations
   listReservations: (q?: ReservationListQuery) => request<ReservationDto[]>('/reservations', { query: q as ReqInit['query'] }),
+  reservationsCount: (q?: ReservationListQuery) => request<number>('/reservations/count', { query: q as ReqInit['query'] }),
   getReservation: (id: string) => request<ReservationDto>(`/reservations/${id}`),
   createReservation: (b: CreateReservationBody) => request<ReservationDto>('/reservations', { method: 'POST', body: b }),
   editReservation: (id: string, patch: Partial<CreateReservationBody>) =>

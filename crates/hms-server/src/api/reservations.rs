@@ -14,6 +14,7 @@ use uuid::Uuid;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list).post(create))
+        .route("/count", get(count))
         .route("/{id}", get(by_id).patch(edit))
         .route("/{id}/check-in", post(check_in))
         .route("/{id}/check-out", post(check_out))
@@ -273,6 +274,35 @@ async fn list(
     .await
     .map_err(ApiError::from)?;
     Ok(Json(ApiResponse { success: true, data: rows, error: None }))
+}
+
+/// Total rows for the same filters as `list` — powers the reference list
+/// footer ("86 records", "1-20 / 86") without OFFSET paging.
+async fn count(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Query(q): Query<ListQuery>,
+) -> AResult<Json<ApiResponse<i64>>> {
+    if !crate::auth::has_permission(&state.db, &auth.role, auth.hotel_id, hms_core::roles::Permission::ReservationView).await? {
+        return Err(ApiError(StatusCode::FORBIDDEN, "reservation_view required".into()));
+    }
+    let mut conn = state.db.acquire().await.map_err(ApiError::from)?;
+    db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
+    let total: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM reservations
+           WHERE hotel_id = $1
+             AND (COALESCE($2::text, status) = status OR $2::text IS NULL)
+             AND ($3::date IS NULL OR checkout_date > $3)
+             AND ($4::date IS NULL OR checkin_date < $4)"#,
+    )
+    .bind(auth.hotel_id)
+    .bind(q.status)
+    .bind(q.from)
+    .bind(q.to)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(ApiError::from)?;
+    Ok(Json(ApiResponse { success: true, data: total, error: None }))
 }
 
 async fn by_id(
