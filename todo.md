@@ -227,6 +227,7 @@ Goal: restyle/extend `apps/web` to match the reference hotel app's frame and pat
 ## 10. Security & compliance (README Â§8) â€” [P1]
 
 - [ ] Guest data (KVKK/GDPR): per-hotel export and deletion endpoints, encryption at rest where practical
+  - REA review of the shipped desktop artifacts 2026-10-29 (REA CLI 6.8.0; evidence ev_d693f92, ev_d901d30, ev_ab63bca, ev_03f8f60, ev_8d11eaa + labeled byte-scan/hash observations): msi payload byte-identical to the release exe except Tauri's 3-byte bundle-type marker _MSI/_UNK at offset 7682301; the fresh 6.4 web dist fingerprints and all 5 IPC command names are embedded; DPAPI (CryptProtectData/CryptUnprotectData) and BCryptGenRandom confirmed linked; runtime sqlite carries exactly the 0001_init.sql 12-table schema with empty kv. Two follow-ups surfaced: build releases with `cargo auditable build` (no .dep-v0 section in the current exe - no verifiable dependency inventory), and replace the template icon set (icons/icon.ico is 192 B, one 32x32 image) with a designed multi-size HMS icon before distribution. Both fold into existing Phase 10 items below.
 - [ ] Encrypt sensitive guest fields at rest (models have `*_encrypted` fields â€” no key management exists)
 - [ ] Rate limiting actually enforced (middleware is a pass-through today)
 - [ ] Production CORS lockdown, TLS termination, security headers
