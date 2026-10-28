@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.hms.desktop",
   "build": {
-    "frontendDist": "../web/dist",
+    "frontendDist": "../../web/dist",
     "devUrl": "http://localhost:4173",
     "beforeDevCommand": "",
     "beforeBuildCommand": ""
