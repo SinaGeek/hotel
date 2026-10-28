@@ -123,7 +123,7 @@ async fn effective_price_for_date(
 }
 
 
-async fn rates_for_stay(
+pub(crate) async fn rates_for_stay(
     conn: &mut sqlx::PgConnection,
     hotel_id: i64,
     room_id: Uuid,
@@ -171,7 +171,7 @@ async fn room_type_of(
 type SQL_ERR = (StatusCode, String);
 
 /// Maintain daily_revenue rows for a reservation change (README Ã‚Â§10): same transaction!
-async fn upsert_daily_revenue(
+pub async fn upsert_daily_revenue(
     conn: &mut sqlx::PgConnection,
     res: &ReservationUpsertInfo,
 ) -> Result<(), (StatusCode, String)> {

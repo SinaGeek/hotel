@@ -7,6 +7,7 @@ pub mod reports;
 pub mod reservations;
 pub mod roles;
 pub mod rooms;
+pub mod sync;
 pub mod users;
 
 use axum::http::StatusCode;
@@ -56,4 +57,5 @@ pub fn router() -> axum::Router<crate::AppState> {
         .nest("/channels", channels::router())
         .nest("/board", reservations::board_router())
         .nest("/reports", reports::router())
+        .nest("/sync", sync::router())
 }
