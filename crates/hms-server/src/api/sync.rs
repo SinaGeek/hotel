@@ -270,12 +270,20 @@ fn op_status_db(s: &SyncOpStatus) -> Option<(&'static str, Option<String>)> {
     }
 }
 
-/// Replays an already-processed op status from the sync_ops row.
-fn replay_status(s: &str) -> SyncOpStatus {
+/// Replays an already-processed op status from the sync_ops row. An op whose
+/// FIRST try applied walks the replay path as duplicate_ignored (it was
+/// already processed — the same terminal outcome, arrived twice), and
+/// conflict resolutions replay with their recorded message.
+fn replay_status(s: &str, detail: Option<String>) -> SyncOpStatus {
     match s {
-        OP_RESOLVED => SyncOpStatus::ConflictResolved { message: "replayed: ".into() },
-        OP_DUP => SyncOpStatus::DuplicateIgnored,
-        _ => SyncOpStatus::Applied,
+        OP_RESOLVED => SyncOpStatus::ConflictResolved {
+            message: detail.unwrap_or_else(|| "replayed: earlier conflict resolution".into()),
+        },
+        // 'applied' OR 'duplicate_ignored' rows: the op was already processed
+        OP_APPLIED | OP_DUP => SyncOpStatus::DuplicateIgnored,
+        other => SyncOpStatus::Rejected {
+            reason: format!("sync_ops recorded an indeterminate status {other:?}; re-check the entity via REST"),
+        },
     }
 }
 
@@ -342,16 +350,16 @@ async fn apply(state: &AppState, auth: &AuthUser, op: &ChangeOperation) -> Resul
     db::set_tenant_scope(&mut conn, auth.hotel_id).await.map_err(|e| e.1)?;
 
     // -------- idempotency: an op already processed replays its recorded status
-    let seen: Option<String> = sqlx::query_scalar(
-        "SELECT status FROM sync_ops WHERE hotel_id = $1 AND operation_id = $2",
+    let seen: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT status, detail FROM sync_ops WHERE hotel_id = $1 AND operation_id = $2",
     )
     .bind(auth.hotel_id)
     .bind(op.operation_id)
     .fetch_optional(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
-    if let Some(s) = seen {
-        let st = replay_status(&s);
+    if let Some((s, detail)) = seen {
+        let st = replay_status(&s, detail);
         let _ = conn.rollback().await; // nothing written
         return Ok(st);
     }
