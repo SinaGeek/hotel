@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../api/client'
+import { StatusPill } from '../components/ui'
 import type { ReservationDto } from '../types/generated/api'
 
 const fmtMoney = (cents: number, currency: string) =>
@@ -55,7 +56,7 @@ export function Reservations() {
               <td className="muted">{r.id.slice(0, 8)}</td>
               <td>{r.checkin_date}</td>
               <td>{r.checkout_date}</td>
-              <td>{t(`res.${r.status}`)}</td>
+              <td><StatusPill status={r.status} label={t(`res.${r.status}`)} /></td>
               <td>{r.adults}+{r.children}</td>
               <td>{fmtMoney(r.total_price_cents, r.currency)}</td>
               <td>{r.voucher_number ?? ''}</td>

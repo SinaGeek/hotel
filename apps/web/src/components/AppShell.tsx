@@ -1,61 +1,185 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+// App shell: dark navy sidebar with expanders, white header (hotel name +
+// code, bell / language / theme / user), round violet FAB. Reference frame
+// per docs/ui-reference.md. Role-aware nav (README §4/§6).
+import { useEffect, useState, type ReactNode } from 'react'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../api/auth'
-import { sessionHasPermission } from '../api/client'
+import { api, sessionHasPermission } from '../api/client'
+import {
+  IconBed, IconBell, IconCalendar, IconChart, IconChevronRight, IconDashboard,
+  IconGlobe, IconHotel, IconList, IconLogout, IconMoon, IconPlus, IconSun,
+  IconUsers, IconGear,
+} from './icons'
 
+interface Item { key: string; label: string; to: string; show: boolean }
+interface Group { key: string; label: string; icon: ReactNode; items: Item[]; show: boolean }
+interface Single { key: string; label: string; to: string; icon: ReactNode; show: boolean; end?: boolean }
 
-// Role-aware nav (README §4/§6): housekeeping only sees rooms/housekeeping.
+const THEME_KEY = 'hms.theme'
+const EXPAND_FOR: Record<string, string> = {
+  // routes that belong to an expander group -> group key
+  '/reservations': 'bookings',
+  '/rooms': 'facility',
+  '/users': 'tools',
+}
+
 export function AppShell() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const location = useLocation()
   const auth = useAuth()
   const session = auth.session
   const role = session?.user.role ?? 'housekeeping'
   const can = (perm: string) => sessionHasPermission(session, perm)
   const isHk = role === 'housekeeping'
+  const hotelCode = session?.user.hotel_id
 
-  const links: Array<{ to: string; label: string; show: boolean }> = [
-    { to: '/', label: t('nav.dashboard'), show: true },
-    { to: '/board', label: t('nav.board'), show: true },
-    { to: '/reservations', label: t('nav.reservations'), show: can('reservation_view') && !isHk },
-    { to: '/guests', label: t('nav.guests'), show: can('reservation_view') && !isHk },
-    { to: '/rooms', label: isHk ? t('nav.housekeeping') : t('nav.rooms'), show: true },
-    { to: '/reports', label: t('reports.title'), show: sessionHasPermission(session, 'report_view_tenant') },
-    { to: '/users', label: t('nav.users'), show: can('user_view') },
+  const [hotelName, setHotelName] = useState<string | null>(null)
+  const hotelId = session?.user.hotel_id
+  useEffect(() => {
+    if (hotelId === undefined) return
+    let alive = true
+    api.listHotels()
+      .then((hs) => { if (alive) setHotelName(hs.find((h) => h.id === hotelId)?.name ?? null) })
+      .catch(() => { /* header falls back to the code only */ })
+    return () => { alive = false }
+  }, [hotelId])
+
+  // theme toggle (light default, persisted)
+  const [theme, setTheme] = useState<'light' | 'dark'>(() =>
+    localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light')
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem(THEME_KEY, theme)
+  }, [theme])
+
+  const showReservations = can('reservation_view') && !isHk
+
+  const groups: Group[] = [
+    {
+      key: 'bookings',
+      label: 'nav.bookings',
+      icon: <IconList />,
+      show: showReservations,
+      items: [{ key: 'list', label: 'nav.list', to: '/reservations', show: showReservations }],
+    },
+    {
+      key: 'facility',
+      label: 'nav.facility',
+      icon: <IconBed />,
+      show: true,
+      items: [{ key: 'rooms', label: isHk ? 'nav.housekeeping' : 'nav.rooms', to: '/rooms', show: true }],
+    },
+    {
+      key: 'tools',
+      label: 'nav.tools',
+      icon: <IconGear />,
+      show: can('user_view'),
+      items: [{ key: 'staff', label: 'nav.staff', to: '/users', show: can('user_view') }],
+    },
+  ]
+  const singles: Single[] = [
+    { key: 'dashboard', label: 'nav.dashboard', to: '/', icon: <IconDashboard />, show: true, end: true },
+    { key: 'board', label: 'nav.board', to: '/board', icon: <IconCalendar />, show: true },
+    { key: 'guests', label: 'nav.guests', to: '/guests', icon: <IconUsers />, show: showReservations },
+    { key: 'reports', label: 'nav.reports', to: '/reports', icon: <IconChart />, show: can('report_view_tenant') },
   ]
 
+  // auto-open the expander that contains the active route
+  const [open, setOpen] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {}
+    for (const g of groups) initial[g.key] = g.items.some((i) => i.to === location.pathname)
+    return initial
+  })
+  useEffect(() => {
+    const groupKey = EXPAND_FOR[location.pathname]
+    if (groupKey) setOpen((o) => ({ ...o, [groupKey]: true }))
+  }, [location.pathname])
+
+  const initials = (session?.user.username ?? '?').slice(0, 2).toUpperCase()
+
   return (
-    <div>
-      <header style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', background: '#fff', borderBottom: '1px solid #e3e8f1' }}>
-        <strong style={{ cursor: 'pointer' }} onClick={() => navigate('/')}>{t('app.title')}</strong>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <span className="muted">{session?.user.username} · {t(`users.${role}`)}</span>
-          <button onClick={() => { auth.signOut(); navigate('/login') }}>{t('nav.logout')}</button>
+    <div className="app-shell">
+      <nav className="sidebar">
+        <div className="side-brand">
+          <span className="logo"><IconHotel /></span>
+          <span>{t('app.title')}</span>
         </div>
-      </header>
-      <div style={{ display: 'flex' }}>
-        <nav style={{ width: 190, padding: '14px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {links.filter((l) => l.show).map((l) => (
-            <NavLink
-              key={l.to}
-              to={l.to}
-              end={l.to === '/'}
-              style={({ isActive }) => ({
-                padding: '8px 12px',
-                borderRadius: 8,
-                textDecoration: 'none',
-                color: isActive ? '#fff' : '#333',
-                background: isActive ? '#2e5bff' : 'transparent',
-              })}
-            >
-              {l.label}
+        <div className="side-nav">
+          {singles.filter((s) => s.show).map((s) => (
+            <NavLink key={s.key} to={s.to} end={s.end} className={({ isActive }) => `side-item${isActive ? ' active' : ''}`}>
+              {s.icon}
+              <span>{t(s.label)}</span>
             </NavLink>
           ))}
-        </nav>
-        <main style={{ flexBasis: 'calc(100% - 190px)', minWidth: 0 }}>
+          {groups.filter((g) => g.show).map((g) => (
+            <div key={g.key} className={g.items.some((i) => i.show) ? 'side-group' : ''}>
+              <button
+                type="button"
+                className={`side-item${g.items.some((i) => i.to === location.pathname) ? ' active' : ''}`}
+                onClick={() => setOpen((o) => ({ ...o, [g.key]: !o[g.key] }))}
+                aria-expanded={!!open[g.key]}
+              >
+                {g.icon}
+                <span>{t(g.label)}</span>
+                <span className={`caret${open[g.key] ? ' open' : ''}`}><IconChevronRight /></span>
+              </button>
+              {open[g.key] && (
+                <div className="side-sub">
+                  {g.items.filter((i) => i.show).map((i) => (
+                    <NavLink key={i.key} to={i.to} className={({ isActive }) => `side-item${isActive ? ' active' : ''}`}>
+                      <span>{t(i.label)}</span>
+                    </NavLink>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="side-bottom">
+          <button type="button" className="side-item" onClick={() => { auth.signOut(); navigate('/login') }}>
+            <IconLogout />
+            <span>{t('nav.logout')}</span>
+          </button>
+        </div>
+      </nav>
+
+      <div className="content">
+        <header className="header">
+          <div>
+            <div className="header-title">{hotelName ?? t('app.title')}</div>
+            <div className="header-sub">{t('shell.hotelCode', { code: hotelCode ?? '' })}</div>
+          </div>
+          <div className="header-right">
+            <button className="icon-btn" aria-label={t('shell.notifications')} title={t('shell.notifications')}><IconBell /></button>
+            <button className="icon-btn" aria-label={t('shell.language')} title={t('shell.language')}><IconGlobe /></button>
+            <button
+              className="icon-btn"
+              aria-label={theme === 'dark' ? t('shell.lightMode') : t('shell.darkMode')}
+              title={theme === 'dark' ? t('shell.lightMode') : t('shell.darkMode')}
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            >
+              {theme === 'dark' ? <IconSun /> : <IconMoon />}
+            </button>
+            <div className="user-chip">
+              <span className="avatar">{initials}</span>
+              <div style={{ lineHeight: 1.2 }}>
+                <div style={{ fontWeight: 600 }}>{session?.user.username}</div>
+                <div className="muted" style={{ fontSize: 12 }}>{t(`users.${role}`)}</div>
+              </div>
+            </div>
+          </div>
+        </header>
+        <main>
           <Outlet />
         </main>
       </div>
+
+      {/* "new record" shortcut; Monthly Room supports create from the board */}
+      <button className="fab" onClick={() => navigate('/board')} aria-label={t('shell.newRecord')} title={t('shell.newRecord')}>
+        <IconPlus />
+      </button>
     </div>
   )
 }
