@@ -64,6 +64,7 @@ export function Reservations() {
             room_number: r.room_number,
             room_type_id: r.room_type_id,
             room_type_name: rt?.name ?? '',
+            floor: r.floor,
             cleanliness: r.cleanliness,
             stays: [],
             seasonal_price_cents: rt?.base_price_cents ?? 0,

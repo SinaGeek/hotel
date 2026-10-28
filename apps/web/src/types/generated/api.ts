@@ -237,6 +237,7 @@ export interface BoardRoom {
   room_type_id: string
   room_type_name: string
   cleanliness: string
+  floor: number
   stays: BoardStay[]
   seasonal_price_cents: number
 }

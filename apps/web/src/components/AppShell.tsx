@@ -21,6 +21,7 @@ const EXPAND_FOR: Record<string, string> = {
   // routes that belong to an expander group -> group key
   '/reservations': 'bookings',
   '/rooms': 'facility',
+  '/housekeeping': 'facility',
   '/users': 'tools',
 }
 
@@ -69,7 +70,12 @@ export function AppShell() {
       label: 'nav.facility',
       icon: <IconBed />,
       show: true,
-      items: [{ key: 'rooms', label: isHk ? 'nav.housekeeping' : 'nav.rooms', to: '/rooms', show: true }],
+      items: isHk
+        ? [{ key: 'update', label: 'nav.updateStatus', to: '/rooms', show: true }]
+        : [
+            { key: 'rooms', label: 'nav.rooms', to: '/rooms', show: true },
+            { key: 'housekeeping', label: 'nav.housekeeping', to: '/housekeeping', show: true },
+          ],
     },
     {
       key: 'tools',

@@ -472,3 +472,6 @@ html[data-theme='dark'] .modal-back { background: rgba(0, 0, 10, 0.6); }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .dash-search { width: 100%; }
 }
+
+/* Floor group header removed: the reference Housekeeping page is a flat
+   table with filters (see facility-housekeeping.ax.txt capture). */

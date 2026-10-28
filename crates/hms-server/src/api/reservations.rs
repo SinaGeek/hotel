@@ -618,6 +618,7 @@ pub struct BoardRoom {
     pub room_type_id: Uuid,
     pub room_type_name: String,
     pub cleanliness: String,
+    pub floor: i32,
     pub stays: Vec<BoardStay>,
     pub seasonal_price_cents: i64,
 }
@@ -653,8 +654,8 @@ async fn board(
     let mut conn = state.db.acquire().await.map_err(ApiError::from)?;
     db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
 
-    let room_ids: Vec<(Uuid, String, Uuid, String, String)> = sqlx::query_as(
-        r#"SELECT r.id, r.room_number, r.room_type_id, rt.name AS room_type_name, r.cleanliness
+    let room_ids: Vec<(Uuid, String, Uuid, String, String, i32)> = sqlx::query_as(
+        r#"SELECT r.id, r.room_number, r.room_type_id, rt.name AS room_type_name, r.cleanliness, r.floor
            FROM rooms r JOIN room_types rt ON rt.id = r.room_type_id
            WHERE r.hotel_id = $1 AND r.deleted_at IS NULL AND rt.deleted_at IS NULL
            ORDER BY r.room_number"#,
@@ -712,7 +713,7 @@ async fn board(
         });
 
     let mut rooms = Vec::new();
-    for (id, number, rt_id, rt_name, cleanliness) in &room_ids {
+    for (id, number, rt_id, rt_name, cleanliness, floor) in &room_ids {
         let seasonal_price_cents = price_by_rt.get(rt_id).copied().unwrap_or(0);
         let stay_rows = stay_map.get(id).cloned().unwrap_or_default();
         let mut stay_list = Vec::new();
@@ -733,6 +734,7 @@ async fn board(
             room_type_id: *rt_id,
             room_type_name: rt_name.clone(),
             cleanliness: cleanliness.clone(),
+            floor: *floor,
             stays: stay_list,
             seasonal_price_cents,
         });

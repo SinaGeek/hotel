@@ -7,6 +7,7 @@ import { Board } from './pages/Board'
 import { Reservations } from './pages/Reservations'
 import { Guests } from './pages/Guests'
 import { Rooms } from './pages/Rooms'
+import { Housekeeping } from './pages/Housekeeping'
 import { Users } from './pages/Users'
 import { Reports } from './pages/Reports'
 import { useAuth } from './api/auth'
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/reservations" element={<Reservations />} />
         <Route path="/guests" element={<Guests />} />
         <Route path="/rooms" element={<Rooms />} />
+        <Route path="/housekeeping" element={<Housekeeping />} />
         <Route path="/users" element={<Users />} />
         <Route path="/reports" element={<Reports />} />
       </Route>
