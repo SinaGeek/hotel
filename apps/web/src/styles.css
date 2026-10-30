@@ -424,8 +424,8 @@ html[data-theme='dark'] .modal-back { background: rgba(0, 0, 10, 0.6); }
 .dash-hotel b { font-size: 17px; }
 .dash-hotel .muted { font-size: 12.5px; }
 
-/* room cards */
-.rc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 1fr)); gap: 12px; }
+/* room cards — compact like the reference dashboard (about 8 tiles/row) */
+.rc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: 10px; }
 .rcard {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -461,17 +461,17 @@ html[data-theme='dark'] .modal-back { background: rgba(0, 0, 10, 0.6); }
 .rc-body .dot { justify-self: start; }
 .rc-book {
   margin-top: 4px;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 8px;
-  background: var(--surface);
+  background: #eceafe; /* lavender tint per the reference's Make Reservation */
   padding: 6px 10px;
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--primary);
   cursor: pointer;
 }
-.rc-book:hover { border-color: var(--primary); color: var(--primary); }
+.rc-book:hover { background: #dcd8fb; }
 
 /* stat cards */
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 16px; }
@@ -481,11 +481,38 @@ html[data-theme='dark'] .modal-back { background: rgba(0, 0, 10, 0.6); }
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 14px 16px;
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
-.stat-card b { font-size: 24px; color: var(--primary); }
-.stat-card span { font-size: 12.5px; color: var(--text-muted); }
+.stat-ic {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #eceafe; /* violet tint circle per the reference stat cards */
+  color: var(--primary);
+}
+.stat-card .stat-num b { font-size: 24px; color: var(--text); display: block; line-height: 1.15; }
+.stat-card .stat-num span { font-size: 12.5px; color: var(--text-muted); }
+
+/* status chips: reference shows a colored indicator dot per chip kind */
+.chip::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+.chip-departToday::before, .chip-willCheckin::before { background: var(--green); }
+.chip-departTomorrow::before { background: var(--gold, #e5a52b); }
+.chip-longTerm::before { background: var(--red); }
+.chip-outs::before { background: #7f1d1d; }
+.chip-dirty::before { background: #3b82f6; }
+.chip.on::before { background: #fff; }
 
 @media (max-width: 640px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }

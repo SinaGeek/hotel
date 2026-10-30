@@ -10,6 +10,12 @@ import { api, ApiError, sessionHasPermission } from '../api/client'
 import { useAuth } from '../api/auth'
 import type { ChannelRevenue, DayReport, RoomRevenue, SummaryReport } from '../types/generated/api'
 
+// Revenue reporting basis (README §10 open question — toggle IS the answer for
+// now): "accrued" recognizes revenue when the stay happens (daily_revenue wall
+// values); "collected" shows the cash basis (payments actually recorded). The
+// server already returns both series in every response.
+type Basis = 'accrued' | 'collected'
+
 const DAY_MS = 86_400_000
 const iso = (d: Date) => d.toISOString().slice(0, 10)
 const money = (cents: number, currency: string) =>
@@ -40,6 +46,7 @@ export function Reports() {
   const [byDay, setByDay] = useState<DayReport[]>([])
   const [byChannel, setByChannel] = useState<ChannelRevenue[]>([])
   const [byRoom, setByRoom] = useState<RoomRevenue[]>([])
+  const [basis, setBasis] = useState<Basis>('accrued')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -78,13 +85,32 @@ export function Reports() {
     })),
     [byDay],
   )
+  const showAccrued = basis === 'accrued'
   const onlyDaysWithMoney = chartData.some((d) => d.Room || d.Extras || d.Collected)
+
+  // Monthly rollup: group the same byDay rows by yyyy-mm — the reference has no
+  // monthly endpoint, and the aggregate over our own rows is exact.
+  const monthData = useMemo(
+    () => Object.entries(
+      byDay.reduce<Record<string, { month: string; Room: number; Extras: number; Collected: number }>>((acc, d) => {
+        const m = d.date.slice(0, 7)
+        acc[m] ??= { month: m, Room: 0, Extras: 0, Collected: 0 }
+        acc[m].Room += d.room_revenue_cents / 100
+        acc[m].Extras += d.extra_revenue_cents / 100
+        acc[m].Collected += d.payments_collected_cents / 100
+        return acc
+      }, {}),
+    ).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v),
+    [byDay],
+  )
+  const showMonths = monthData.length > 1 || (monthData[0]?.month.slice(0, 7) ?? '') !== iso(new Date()).slice(0, 7)
 
   const channelData = useMemo(
     () => byChannel.map((c) => ({
       channel: c.channel_name,
       Room: c.room_revenue_cents / 100,
       Extras: c.extra_revenue_cents / 100,
+      Collected: c.payments_collected_cents / 100,
     })),
     [byChannel],
   )
@@ -105,8 +131,15 @@ export function Reports() {
         <button className="ghost" onClick={() => preset(1)}>{t('reports.today')}</button>
         <button className="ghost" onClick={() => preset(7)}>{t('reports.last7')}</button>
         <button className="ghost" onClick={() => preset(30)}>{t('reports.last30')}</button>
+        <button className="ghost" onClick={() => preset(90)}>{t('reports.last90')}</button>
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        {/* revenue basis (README §10): accrued = recognized with the stay,
+            collected = cash received. Chart + channel table follow the basis. */}
+        <div className="seg" role="tablist" aria-label={t('reports.basis')}>
+          <button className={showAccrued ? 'on' : ''} onClick={() => setBasis('accrued')}>{t('reports.accrued')}</button>
+          <button className={showAccrued ? '' : 'on'} onClick={() => setBasis('collected')}>{t('reports.collected')}</button>
+        </div>
         <button className="primary" disabled={busy} onClick={() => void load()}>{busy ? t('common.loading') : t('reports.refresh')}</button>
         <button className="ghost" onClick={() => window.print()}>{t('reports.printPdf')}</button>
       </div>
@@ -139,15 +172,50 @@ export function Reports() {
               <YAxis />
               <Tooltip />
               <Legend />
-              <Bar dataKey="Room" fill="#2e5bff" name={t('reports.roomRevenue')} />
-              <Bar dataKey="Extras" fill="#2b9a5b" name={t('reports.extraRevenue')} />
-              <Bar dataKey="Collected" fill="#e5a52b" name={t('reports.collected')} />
+              {showAccrued ? (
+                <>
+                  <Bar dataKey="Room" fill="#2e5bff" name={t('reports.roomRevenue')} />
+                  <Bar dataKey="Extras" fill="#2b9a5b" name={t('reports.extraRevenue')} />
+                </>
+              ) : (
+                <Bar dataKey="Collected" fill="#e5a52b" name={t('reports.collected')} />
+              )}
             </BarChart>
           </ResponsiveContainer>
         ) : (
           <p className="muted">{t('reports.noData')}</p>
         )}
       </div>
+
+      {/* monthly rollup (grouped bars when the range spans months) */}
+      {showMonths && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="row">
+            <h3 style={{ margin: 0, flexGrow: 1 }}>{t('reports.byMonth')}</h3>
+            <button className="ghost" onClick={() => downloadCsv(`revenue_months_${from}_${to}.csv`, [
+              [t('reports.month'), t('reports.roomRevenue'), t('reports.extraRevenue'), t('reports.collected')],
+              ...monthData.map((m) => [m.month, m.Room.toFixed(2), m.Extras.toFixed(2), m.Collected.toFixed(2)]),
+            ])}>{t('reports.exportCsv')}</button>
+          </div>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={monthData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="month" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              {showAccrued ? (
+                <>
+                  <Bar dataKey="Room" fill="#2e5bff" name={t('reports.roomRevenue')} />
+                  <Bar dataKey="Extras" fill="#2b9a5b" name={t('reports.extraRevenue')} />
+                </>
+              ) : (
+                <Bar dataKey="Collected" fill="#e5a52b" name={t('reports.collected')} />
+              )}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         {/* by channel */}
@@ -160,13 +228,14 @@ export function Reports() {
             ])}>{t('reports.exportCsv')}</button>
           </div>
           <table className="hms">
-            <thead><tr><th>{t('reports.channel')}</th><th>{t('reports.roomRevenue')}</th><th>{t('reports.extraRevenue')}</th><th>{t('reports.occupiedNights')}</th></tr></thead>
+            <thead><tr><th>{t('reports.channel')}</th><th>{t('reports.roomRevenue')}</th><th>{t('reports.extraRevenue')}</th><th>{t('reports.collected')}</th><th>{t('reports.occupiedNights')}</th></tr></thead>
             <tbody>
               {byChannel.map((c) => (
                 <tr key={c.channel_id}>
                   <td>{c.channel_name}</td>
                   <td>{cur(c.room_revenue_cents)}</td>
                   <td>{cur(c.extra_revenue_cents)}</td>
+                  <td>{cur(c.payments_collected_cents)}</td>
                   <td>{c.occupied_nights}</td>
                 </tr>
               ))}
@@ -210,8 +279,14 @@ export function Reports() {
             <YAxis dataKey="channel" type="category" width={100} />
             <Tooltip />
             <Legend />
-            <Bar dataKey="Room" fill="#2e5bff" name={t('reports.roomRevenue')} />
-            <Bar dataKey="Extras" fill="#2b9a5b" name={t('reports.extraRevenue')} />
+            {showAccrued ? (
+              <>
+                <Bar dataKey="Room" fill="#2e5bff" name={t('reports.roomRevenue')} />
+                <Bar dataKey="Extras" fill="#2b9a5b" name={t('reports.extraRevenue')} />
+              </>
+            ) : (
+              <Bar dataKey="Collected" fill="#e5a52b" name={t('reports.collected')} />
+            )}
           </BarChart>
         </ResponsiveContainer>
       </div>

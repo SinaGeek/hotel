@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next'
 import { api, sessionHasPermission, ApiError } from '../api/client'
 import { useAuth } from '../api/auth'
 import { NewReservationModal, ReservationDetailModal, iso } from '../components/reservation-modals'
+import { IconBed, IconHotel, IconUsers } from '../components/icons'
 import type { BoardResponse, BoardStay, ChannelDto, GuestDto, ReservationDto, RoomTypeDto } from '../types/generated/api'
 
 const NIGHT_MS = 86_400_000
@@ -233,7 +234,7 @@ export function Dashboard() {
         {CHIP_IDS.map((c) => (
           <button
             key={c}
-            className={`chip${chip === c ? ' on' : ''}`}
+            className={`chip chip-${c}${chip === c ? ' on' : ''}`}
             onClick={() => setChip((cur) => (cur === c ? null : c))}
           >
             {t(`dash.chip.${c}`)} <b>{chipCounts[c]}</b>
@@ -290,10 +291,10 @@ export function Dashboard() {
       </div>
 
       <div className="stat-grid">
-        <div className="stat-card"><b>{occupied}</b><span>{t('dash.stat.occupied')}</span></div>
-        {!isHk && <div className="stat-card"><b>{guestsToday}</b><span>{t('dash.stat.guests')}</span></div>}
-        <div className="stat-card"><b>{vacancies}</b><span>{t('dash.stat.vacant')}</span></div>
-        <div className="stat-card"><b>{rooms.length}</b><span>{t('dash.stat.total')}</span></div>
+        <div className="stat-card"><span className="stat-ic"><IconBed /></span><span className="stat-num"><b>{occupied}</b><span>{t('dash.stat.occupied')}</span></span></div>
+        {!isHk && <div className="stat-card"><span className="stat-ic"><IconUsers /></span><span className="stat-num"><b>{guestsToday}</b><span>{t('dash.stat.guests')}</span></span></div>}
+        <div className="stat-card"><span className="stat-ic"><IconBed /></span><span className="stat-num"><b>{vacancies}</b><span>{t('dash.stat.vacant')}</span></span></div>
+        <div className="stat-card"><span className="stat-ic"><IconHotel /></span><span className="stat-num"><b>{rooms.length}</b><span>{t('dash.stat.total')}</span></span></div>
       </div>
 
       {creating != null && (
