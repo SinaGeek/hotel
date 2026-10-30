@@ -324,6 +324,8 @@ const en = {
     date: 'Date',
     occupiedNights: 'Occupied nights',
     noData: 'No revenue in this period.',
+    offlineTitle: 'Offline report from this device',
+    offlineDetail: 'Values use the last synced local data. Room totals are spread evenly across stay nights; sync to reconcile with the server.',
     exportCsv: 'Export CSV',
     printPdf: 'Print / PDF',
   },

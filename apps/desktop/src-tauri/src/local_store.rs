@@ -7,7 +7,7 @@
 use crate::dpapi;
 use chrono::Utc;
 use hms_core::sync::{
-    ChangeOperation, EntityType, OperationType, OfflineLoginCache, ServerChangeRecord,
+    ChangeOperation, EntityType, OfflineLoginCache, OperationType, ServerChangeRecord,
 };
 use hms_sync::store::{QueuedOperation, RemoteOutcome, Settle, StoreError, SyncStore};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -15,7 +15,9 @@ use std::path::Path;
 use uuid::Uuid;
 
 pub struct LocalStore {
-    conn: Connection,
+    /// Direct handle for the offline report reads (`reports.rs`); sync engine
+    /// access stays behind the `SyncStore` trait methods.
+    pub(crate) conn: Connection,
 }
 
 fn se(e: rusqlite::Error) -> StoreError {
@@ -27,12 +29,12 @@ impl LocalStore {
     /// token + offline cache are stored DPAPI-protected inside `kv`.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         let conn = Connection::open(path).map_err(se)?;
-        conn.pragma_update(None, "journal_mode", "WAL").map_err(se)?;
-        conn.pragma_update(None, "synchronous", "NORMAL").map_err(se)?;
-        conn.execute_batch(include_str!(
-            "../desktop-migrations/0001_init.sql"
-        ))
-        .map_err(se)?;
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(se)?;
+        conn.pragma_update(None, "synchronous", "NORMAL")
+            .map_err(se)?;
+        conn.execute_batch(include_str!("../desktop-migrations/0001_init.sql"))
+            .map_err(se)?;
         Ok(Self { conn })
     }
 
@@ -42,27 +44,28 @@ impl LocalStore {
     #[allow(dead_code)] // consumed by #[cfg(test)] and the next integration step
     pub fn with_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory().map_err(se)?;
-        conn.execute_batch(include_str!(
-            "../desktop-migrations/0001_init.sql"
-        ))
-        .map_err(se)?;
+        conn.execute_batch(include_str!("../desktop-migrations/0001_init.sql"))
+            .map_err(se)?;
         Ok(Self { conn })
     }
 
     // ---- offline login cache (kv-backed, DPAPI-protected sensitive fields)
 
     pub fn save_offline_cache(&mut self, cache: &OfflineLoginCache) -> Result<(), StoreError> {
-        let value = serde_json::to_string(cache)
-            .map_err(|e| StoreError::Io(e.to_string()))?;
-        let protected = dpapi::protect(value.as_bytes())
-            .map_err(StoreError::Io)?;
+        let value = serde_json::to_string(cache).map_err(|e| StoreError::Io(e.to_string()))?;
+        let protected = dpapi::protect(value.as_bytes()).map_err(StoreError::Io)?;
         let hex = hex_encode(&protected);
         self.kv_set("offline_login_cache", &hex)
     }
 
     pub fn load_offline_cache(&mut self) -> Result<Option<OfflineLoginCache>, StoreError> {
-        let Some(hex) = self.conn
-            .query_row("SELECT value FROM kv WHERE key = 'offline_login_cache'", [], |r| r.get::<_, String>(0))
+        let Some(hex) = self
+            .conn
+            .query_row(
+                "SELECT value FROM kv WHERE key = 'offline_login_cache'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
             .optional()
             .map_err(se)?
         else {
@@ -71,11 +74,14 @@ impl LocalStore {
         let bytes = hex_decode(&hex).map_err(StoreError::Io)?;
         let plain = dpapi::unprotect(&bytes).map_err(StoreError::Io)?;
         let s = String::from_utf8(plain).map_err(|e| StoreError::Io(e.to_string()))?;
-        serde_json::from_str(&s).map(Some).map_err(|e| StoreError::Io(e.to_string()))
+        serde_json::from_str(&s)
+            .map(Some)
+            .map_err(|e| StoreError::Io(e.to_string()))
     }
 
     pub fn drop_offline_cache(&mut self) -> Result<(), StoreError> {
-        self.conn.execute("DELETE FROM kv WHERE key = 'offline_login_cache'", [])
+        self.conn
+            .execute("DELETE FROM kv WHERE key = 'offline_login_cache'", [])
             .map_err(se)?;
         Ok(())
     }
@@ -88,8 +94,11 @@ impl LocalStore {
     }
 
     pub fn load_token(&mut self) -> Result<Option<String>, StoreError> {
-        let Some(hex) = self.conn
-            .query_row("SELECT value FROM kv WHERE key = 'auth_token'", [], |r| r.get::<_, String>(0))
+        let Some(hex) = self
+            .conn
+            .query_row("SELECT value FROM kv WHERE key = 'auth_token'", [], |r| {
+                r.get::<_, String>(0)
+            })
             .optional()
             .map_err(se)?
         else {
@@ -116,14 +125,56 @@ impl LocalStore {
     pub fn hotel_id(&mut self) -> Result<i64, StoreError> {
         Ok(self
             .conn
-            .query_row("SELECT value FROM kv WHERE key = 'hotel_id'", [], |r| r.get::<_, String>(0))
+            .query_row("SELECT value FROM kv WHERE key = 'hotel_id'", [], |r| {
+                r.get::<_, String>(0)
+            })
             .optional()
             .map_err(se)?
             .and_then(|v| v.parse().ok())
             .unwrap_or(0))
     }
 
+    /// Switch the local mirror to another hotel. The schema is deliberately
+    /// single-tenant (no hotel_id on mirror rows), so changing scope must
+    /// atomically purge the previous hotel's data and sync bookkeeping first.
+    pub fn report_currency(&self) -> Result<String, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT value FROM kv WHERE key = 'report_currency'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(se)?
+            .unwrap_or_else(|| "TRY".to_owned()))
+    }
+
+    pub fn set_report_currency(&mut self, currency: &str) -> Result<(), StoreError> {
+        self.kv_set("report_currency", currency)
+    }
+
     pub fn set_hotel_id(&mut self, hotel_id: i64) -> Result<(), StoreError> {
+        let current = self.hotel_id()?;
+        if current != 0 && current != hotel_id {
+            let tx = self.conn.transaction().map_err(se)?;
+            tx.execute_batch(
+                "DELETE FROM applied_ops;
+                 DELETE FROM outbox;
+                 DELETE FROM failures;
+                 DELETE FROM guests;
+                 DELETE FROM room_types;
+                 DELETE FROM rooms;
+                 DELETE FROM channels;
+                 DELETE FROM price_rules;
+                 DELETE FROM reservations;
+                 DELETE FROM payments;
+                 DELETE FROM folio_transactions;
+                 DELETE FROM kv WHERE key IN ('pull_cursor','last_synced_at','offline_login_cache','report_currency');",
+            )
+            .map_err(se)?;
+            tx.commit().map_err(se)?;
+        }
         self.kv_set("hotel_id", &hotel_id.to_string())
     }
 
@@ -146,7 +197,10 @@ impl LocalStore {
     /// of this hotel newest-first.
     #[allow(dead_code)] // local read API for the UI wiring step
     pub fn list_reservation_ids(&self) -> Result<Vec<String>, StoreError> {
-        let mut stmt = self.conn.prepare("SELECT id FROM reservations ORDER BY checkin_date DESC").map_err(se)?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM reservations ORDER BY checkin_date DESC")
+            .map_err(se)?;
         let rows = stmt
             .query_map([], |r| r.get::<_, String>(0))
             .map_err(se)?
@@ -237,7 +291,12 @@ impl SyncStore for LocalStore {
             .execute(
                 "UPDATE outbox SET attempts = ?2, last_error = ?3, next_retry_at_ms = ?4
                  WHERE operation_id = ?1",
-                params![operation_id.to_string(), attempts as i64, last_error, next_retry_at_ms],
+                params![
+                    operation_id.to_string(),
+                    attempts as i64,
+                    last_error,
+                    next_retry_at_ms
+                ],
             )
             .map_err(se)?;
         Ok(())
@@ -295,7 +354,10 @@ impl SyncStore for LocalStore {
 
     fn clear_failure(&mut self, operation_id: Uuid) -> Result<(), StoreError> {
         self.conn
-            .execute("DELETE FROM failures WHERE operation_id = ?1", params![operation_id.to_string()])
+            .execute(
+                "DELETE FROM failures WHERE operation_id = ?1",
+                params![operation_id.to_string()],
+            )
             .map_err(se)?;
         Ok(())
     }
@@ -311,7 +373,9 @@ impl SyncStore for LocalStore {
     fn pull_cursor(&mut self) -> Result<i64, StoreError> {
         Ok(self
             .conn
-            .query_row("SELECT value FROM kv WHERE key = 'pull_cursor'", [], |r| r.get::<_, String>(0))
+            .query_row("SELECT value FROM kv WHERE key = 'pull_cursor'", [], |r| {
+                r.get::<_, String>(0)
+            })
             .optional()
             .map_err(se)?
             .and_then(|v| v.parse().ok())
@@ -365,11 +429,15 @@ impl SyncStore for LocalStore {
             }
             (EntityType::Guest, OperationType::Delete) => {
                 self.conn
-                    .execute("UPDATE guests SET deleted_at = ?2 WHERE id = ?1", params![eid, now])
+                    .execute(
+                        "UPDATE guests SET deleted_at = ?2 WHERE id = ?1",
+                        params![eid, now],
+                    )
                     .map_err(se)?;
             }
             (EntityType::Reservation, OperationType::Insert | OperationType::Update) => {
-                let conflict = payload.get("conflict").is_some() || payload["status"].as_str() == Some("conflict");
+                let conflict = payload.get("conflict").is_some()
+                    || payload["status"].as_str() == Some("conflict");
                 self.conn
                     .execute(
                         "INSERT INTO reservations
@@ -402,7 +470,10 @@ impl SyncStore for LocalStore {
             }
             (EntityType::Reservation, OperationType::Delete) => {
                 self.conn
-                    .execute("UPDATE reservations SET deleted_at = ?2 WHERE id = ?1", params![eid, now])
+                    .execute(
+                        "UPDATE reservations SET deleted_at = ?2 WHERE id = ?1",
+                        params![eid, now],
+                    )
                     .map_err(se)?;
             }
             (EntityType::Room, OperationType::Insert | OperationType::Update) => {
@@ -529,12 +600,18 @@ impl SyncStore for LocalStore {
             }
             (EntityType::Room, OperationType::Delete) => {
                 self.conn
-                    .execute("UPDATE rooms SET deleted_at = ?2 WHERE id = ?1", params![eid, now])
+                    .execute(
+                        "UPDATE rooms SET deleted_at = ?2 WHERE id = ?1",
+                        params![eid, now],
+                    )
                     .map_err(se)?;
             }
             (EntityType::RoomType, OperationType::Delete) => {
                 self.conn
-                    .execute("UPDATE room_types SET deleted_at = ?2 WHERE id = ?1", params![eid, now])
+                    .execute(
+                        "UPDATE room_types SET deleted_at = ?2 WHERE id = ?1",
+                        params![eid, now],
+                    )
                     .map_err(se)?;
             }
             (EntityType::RoomStatus, OperationType::Delete) => {
@@ -547,7 +624,10 @@ impl SyncStore for LocalStore {
             }
             (EntityType::Channel, OperationType::Delete) => {
                 self.conn
-                    .execute("UPDATE channels SET is_active = 0 WHERE id = ?1", params![eid])
+                    .execute(
+                        "UPDATE channels SET is_active = 0 WHERE id = ?1",
+                        params![eid],
+                    )
                     .map_err(se)?;
             }
         }
@@ -565,7 +645,11 @@ impl SyncStore for LocalStore {
     fn last_synced_at_ms(&mut self) -> Result<Option<i64>, StoreError> {
         Ok(self
             .conn
-            .query_row("SELECT value FROM kv WHERE key = 'last_synced_at'", [], |r| r.get::<_, String>(0))
+            .query_row(
+                "SELECT value FROM kv WHERE key = 'last_synced_at'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
             .optional()
             .map_err(se)?
             .and_then(|v| v.parse().ok()))
@@ -651,8 +735,8 @@ fn operation_of(s: &str) -> OperationType {
 mod tests {
     use super::*;
     use hms_core::sync::{
-        DEFAULT_OFFLINE_LOGIN_DAYS, SyncOpResult, SyncOpStatus, SyncPullResponse,
-        SyncPushRequest, SyncPushResponse,
+        SyncOpResult, SyncOpStatus, SyncPullResponse, SyncPushRequest, SyncPushResponse,
+        DEFAULT_OFFLINE_LOGIN_DAYS,
     };
     use hms_sync::engine::SyncEngine;
     use hms_sync::transport::{SyncTransport, TransportError};
@@ -672,7 +756,12 @@ mod tests {
         }
     }
 
-    fn server_change(seq: i64, entity_type: EntityType, entity_id: Uuid, payload: serde_json::Value) -> ServerChangeRecord {
+    fn server_change(
+        seq: i64,
+        entity_type: EntityType,
+        entity_id: Uuid,
+        payload: serde_json::Value,
+    ) -> ServerChangeRecord {
         ServerChangeRecord {
             change_counter: seq,
             hotel_id: HOTEL,
@@ -749,7 +838,10 @@ mod tests {
         // two ops enqueued out of order; pending() is oldest-enqueue first
         let op_a = guest_op("Ada");
         s.enqueue(op_a.clone(), 100).unwrap();
-        let op_b = ChangeOperation { operation_id: Uuid::now_v7(), ..op_a.clone() };
+        let op_b = ChangeOperation {
+            operation_id: Uuid::now_v7(),
+            ..op_a.clone()
+        };
         s.enqueue(op_b.clone(), 50).unwrap();
 
         let q = s.pending(10).unwrap();
@@ -767,7 +859,8 @@ mod tests {
         assert_eq!(q[1].last_error.as_deref(), Some("net down"));
         assert_eq!(q[1].next_retry_at_ms, Some(2_000));
 
-        s.settle(op_a.operation_id, hms_sync::store::Settle::Acknowledged).unwrap();
+        s.settle(op_a.operation_id, hms_sync::store::Settle::Acknowledged)
+            .unwrap();
         assert_eq!(s.pending_count().unwrap(), 1);
 
         // permanent rejection: out of the outbox, preserved in the failure list
@@ -868,14 +961,16 @@ mod tests {
         assert_eq!(loaded.role, hms_core::roles::Role::Housekeeping);
         assert_eq!(loaded.password_hash, cache.password_hash);
         assert!(loaded.is_valid(Utc::now()));
-        assert!(!loaded.is_valid(Utc::now() + chrono::Duration::days(DEFAULT_OFFLINE_LOGIN_DAYS + 1)));
+        assert!(
+            !loaded.is_valid(Utc::now() + chrono::Duration::days(DEFAULT_OFFLINE_LOGIN_DAYS + 1))
+        );
 
         s.drop_offline_cache().unwrap();
         assert!(s.load_offline_cache().unwrap().is_none());
     }
 
     #[test]
-    fn token_round_trip_and_hotel_default() {
+    fn token_round_trip_and_hotel_switch_clears_previous_tenant() {
         let mut s = LocalStore::with_in_memory().unwrap();
         let token = "b2987dd930734f44a35f00dfa8a9e0a2";
         assert_eq!(s.load_token().unwrap(), None);
@@ -884,8 +979,28 @@ mod tests {
         assert_eq!(s.hotel_id().unwrap(), 0, "no login recorded yet");
         s.set_hotel_id(HOTEL).unwrap();
         assert_eq!(s.hotel_id().unwrap(), HOTEL);
+        s.conn
+            .execute(
+                "INSERT INTO guests (id, full_name) VALUES ('old-guest','Old Tenant Guest')",
+                [],
+            )
+            .unwrap();
+        s.set_pull_cursor(42).unwrap();
         s.set_hotel_id(1).unwrap();
-        assert_eq!(s.hotel_id().unwrap(), 1, "kv overwrite wins");
+        assert_eq!(s.hotel_id().unwrap(), 1);
+        assert_eq!(
+            s.pull_cursor().unwrap(),
+            0,
+            "tenant switch resets the sync cursor"
+        );
+        let guests: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM guests", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            guests, 0,
+            "tenant switch must not expose prior tenant mirror rows"
+        );
     }
 
     #[tokio::test]

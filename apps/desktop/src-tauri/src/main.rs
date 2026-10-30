@@ -36,7 +36,11 @@ struct AppState {
 #[serde(tag = "state", content = "detail")]
 enum SyncState {
     /// logged in and one cycle at least finished
-    Synced { synced_at_ms: i64, pending: usize, conflicts: usize },
+    Synced {
+        synced_at_ms: i64,
+        pending: usize,
+        conflicts: usize,
+    },
     /// last cycle failed (offline / update / store error)
     Failing { reason: String, pending: usize },
     /// 401/403 at sync: wiped offline cache, force online re-login
@@ -50,6 +54,20 @@ fn sync_status(state: tauri::State<'_, AppState>) -> SyncState {
     state.synced_rx.borrow().clone()
 }
 
+#[tauri::command]
+async fn set_report_currency(
+    state: tauri::State<'_, AppState>,
+    currency: String,
+) -> Result<(), String> {
+    if currency.len() != 3 || !currency.chars().all(|c| c.is_ascii_uppercase()) {
+        return Err("invalid currency code".into());
+    }
+    let mut store = LocalStore::open(&state.db_path).map_err(|e| e.to_string())?;
+    store
+        .set_report_currency(&currency)
+        .map_err(|e| e.to_string())
+}
+
 /// Webview calls after each online login / refresh so the worker can sync.
 #[tauri::command]
 async fn set_auth_token(
@@ -57,10 +75,10 @@ async fn set_auth_token(
     token: String,
     hotel_id: i64,
 ) -> Result<(), String> {
-    *state.token.write().await = Some(token.clone());
     let mut store = LocalStore::open(&state.db_path).map_err(|e| e.to_string())?;
-    store.save_token(&token).map_err(|e| e.to_string())?;
     store.set_hotel_id(hotel_id).map_err(|e| e.to_string())?;
+    store.save_token(&token).map_err(|e| e.to_string())?;
+    *state.token.write().await = Some(token);
     let msg = summarize(&state.db_path, None).map_err(|e| e.to_string())?;
     let _ = state.synced_tx().send(msg);
     Ok(())
@@ -76,13 +94,20 @@ async fn remember_offline_credentials(
     password_hash: String,
     role: String,
 ) -> Result<(), String> {
-    let role = hms_core::roles::Role::from_str(&role)
-        .ok_or_else(|| format!("unknown role '{}'", role))?;
+    let role =
+        hms_core::roles::Role::from_str(&role).ok_or_else(|| format!("unknown role '{}'", role))?;
     let user_id: uuid::Uuid = user_id
         .parse::<uuid::Uuid>()
         .map_err(|e: uuid::Error| e.to_string())?;
     let mut store = LocalStore::open(&state.db_path).map_err(|e| e.to_string())?;
-    offline::cache_from_online_login(&mut store, user_id, hotel_id, &username, &password_hash, role)
+    offline::cache_from_online_login(
+        &mut store,
+        user_id,
+        hotel_id,
+        &username,
+        &password_hash,
+        role,
+    )
 }
 
 /// Offline login against the DPAPI-protected cache (README §11.7).
@@ -190,7 +215,9 @@ async fn run_cycle(
         // blocking if a writer holds the lock for an instant
         token.try_read().ok().and_then(|g| (*g).clone())
     });
-    SyncEngine::new(hotel_id, store, transport).sync_once().await
+    SyncEngine::new(hotel_id, store, transport)
+        .sync_once()
+        .await
 }
 
 /// Rebuild the status snapshot from the local store after a cycle.
@@ -200,7 +227,11 @@ fn summarize(db_path: &std::path::Path, failure: Option<String>) -> Result<SyncS
     let conflicts = store.conflict_count()?;
     Ok(match (store.last_synced_at_ms()?, failure) {
         (Some(_at), Some(reason)) => SyncState::Failing { reason, pending },
-        (Some(at), None) => SyncState::Synced { synced_at_ms: at, pending, conflicts },
+        (Some(at), None) => SyncState::Synced {
+            synced_at_ms: at,
+            pending,
+            conflicts,
+        },
         (None, Some(reason)) => SyncState::Failing { reason, pending },
         (None, None) => SyncState::Unknown,
     })
@@ -219,17 +250,20 @@ async fn main() {
     let db_path = db_dir.join("hms.sqlite");
 
     let token: Arc<RwLock<Option<String>>> = Arc::new(RwLock::new(
-        LocalStore::open(&db_path).ok().and_then(|mut s| s.load_token().ok().flatten()),
+        LocalStore::open(&db_path)
+            .ok()
+            .and_then(|mut s| s.load_token().ok().flatten()),
     ));
 
-    let (sync_tx, sync_rx) = watch::channel(
-        summarize(&db_path, None).unwrap_or(SyncState::Unknown),
-    );
+    let (sync_tx, sync_rx) =
+        watch::channel(summarize(&db_path, None).unwrap_or(SyncState::Unknown));
 
-    let api_base = std::env::var("HMS_API_BASE")
-        .unwrap_or_else(|_| "http://localhost:8080".into());
+    let api_base = std::env::var("HMS_API_BASE").unwrap_or_else(|_| "http://localhost:8080".into());
     let interval = std::time::Duration::from_secs(
-        std::env::var("SYNC_INTERVAL_SECS").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(30),
+        std::env::var("SYNC_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(30),
     );
 
     let state = AppState {
@@ -281,6 +315,7 @@ async fn main() {
         .invoke_handler(tauri::generate_handler![
             sync_status,
             set_auth_token,
+            set_report_currency,
             remember_offline_credentials,
             offline_login,
             offline_reports,

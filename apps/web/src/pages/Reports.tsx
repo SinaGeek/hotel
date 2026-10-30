@@ -7,6 +7,7 @@ import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { api, ApiError, sessionHasPermission } from '../api/client'
+import { desktop, isDesktop, type OfflineReports } from '../api/desktop'
 import { useAuth } from '../api/auth'
 import type { ChannelRevenue, DayReport, RoomRevenue, SummaryReport } from '../types/generated/api'
 
@@ -49,6 +50,7 @@ export function Reports() {
   const [basis, setBasis] = useState<Basis>('accrued')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [offlineData, setOfflineData] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -64,12 +66,31 @@ export function Reports() {
       setByDay(d)
       setByChannel(c)
       setByRoom(r)
+      setOfflineData(false)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      // Offline desktop only: the local mirror has a dedicated report command.
+      // A normal browser never silently serves cached or partial report data.
+      if (isDesktop) {
+        try {
+          const local: OfflineReports = await desktop.offlineReports(from, to)
+          setSummary({ ...local.summary, currency: summary?.currency ?? 'TRY' })
+          setByDay(local.by_day)
+          setByChannel(local.by_channel)
+          setByRoom(local.by_room)
+          setOfflineData(true)
+          setError(null)
+          return
+        } catch (offlineError) {
+          const onlineMessage = e instanceof ApiError ? e.message : String(e)
+          setError(`${onlineMessage} — ${String(offlineError)}`)
+        }
+      } else {
+        setError(e instanceof ApiError ? e.message : String(e))
+      }
     } finally {
       setBusy(false)
     }
-  }, [from, to])
+  }, [from, to, summary?.currency])
 
   useEffect(() => { if (session) void load() }, [load, session])
 
@@ -143,6 +164,12 @@ export function Reports() {
         <button className="primary" disabled={busy} onClick={() => void load()}>{busy ? t('common.loading') : t('reports.refresh')}</button>
         <button className="ghost" onClick={() => window.print()}>{t('reports.printPdf')}</button>
       </div>
+      {offlineData && (
+        <div className="card offline-report-banner" role="status">
+          <b>{t('reports.offlineTitle')}</b>
+          <span>{t('reports.offlineDetail')}</span>
+        </div>
+      )}
       {error && <p style={{ color: 'red' }}>{t('common.error')}: {error}</p>}
 
       {/* KPI summary */}

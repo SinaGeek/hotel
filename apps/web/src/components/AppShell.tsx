@@ -6,6 +6,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../api/auth'
 import { api, sessionHasPermission } from '../api/client'
+import { desktop, isDesktop } from '../api/desktop'
 import { SyncStatusPill } from './SyncStatus'
 import {
   IconBed, IconBell, IconCalendar, IconChart, IconChevronRight, IconDashboard,
@@ -50,7 +51,14 @@ export function AppShell() {
     if (hotelId === undefined) return
     let alive = true
     api.listHotels()
-      .then((hs) => { if (alive) setHotelName(hs.find((h) => h.id === hotelId)?.name ?? null) })
+      .then((hs) => {
+        if (!alive) return
+        const hotel = hs.find((h) => h.id === hotelId)
+        setHotelName(hotel?.name ?? null)
+        if (isDesktop && hotel?.default_currency) {
+          void desktop.setReportCurrency(hotel.default_currency).catch(() => { /* report currency cache is best effort */ })
+        }
+      })
       .catch(() => { /* header falls back to the code only */ })
     return () => { alive = false }
   }, [hotelId])

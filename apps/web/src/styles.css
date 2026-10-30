@@ -514,6 +514,18 @@ html[data-theme='dark'] .modal-back { background: rgba(0, 0, 10, 0.6); }
 .chip-dirty::before { background: #3b82f6; }
 .chip.on::before { background: #fff; }
 
+/* Offline report fallback: distinguish last-synced mirror values from live data. */
+.offline-report-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-direction: column;
+  margin: 12px 0;
+  border-color: var(--gold);
+  background: var(--gold-soft);
+  color: var(--gold-text);
+}
+
 /* -------------------------------------------------------------- responsive
    Mobile-friendly layout (README §4 / todo 103): tables scroll inside their
    card, KPIs fold to 2 columns, the sidebar becomes off-canvas behind a
