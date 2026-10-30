@@ -227,7 +227,7 @@ export function Reports() {
               ...byChannel.map((c) => [c.channel_name, (c.room_revenue_cents / 100).toFixed(2), (c.extra_revenue_cents / 100).toFixed(2), (c.payments_collected_cents / 100).toFixed(2), c.occupied_nights]),
             ])}>{t('reports.exportCsv')}</button>
           </div>
-          <table className="hms">
+          <div className="table-wrap"><table className="hms">
             <thead><tr><th>{t('reports.channel')}</th><th>{t('reports.roomRevenue')}</th><th>{t('reports.extraRevenue')}</th><th>{t('reports.collected')}</th><th>{t('reports.occupiedNights')}</th></tr></thead>
             <tbody>
               {byChannel.map((c) => (
@@ -240,7 +240,7 @@ export function Reports() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
 
         {/* by room */}
@@ -252,7 +252,7 @@ export function Reports() {
               ...byRoom.map((r) => [r.room_number, r.room_type_name, (r.room_revenue_cents / 100).toFixed(2), (r.extra_revenue_cents / 100).toFixed(2), r.occupied_nights]),
             ])}>{t('reports.exportCsv')}</button>
           </div>
-          <table className="hms">
+          <div className="table-wrap"><table className="hms">
             <thead><tr><th>{t('rooms.number')}</th><th>{t('rooms.type')}</th><th>{t('reports.roomRevenue')}</th><th>{t('reports.extraRevenue')}</th><th>{t('reports.occupiedNights')}</th></tr></thead>
             <tbody>
               {byRoom.map((r) => (
@@ -265,7 +265,7 @@ export function Reports() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       </div>
 

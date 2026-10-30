@@ -135,7 +135,7 @@ export function Housekeeping() {
         {hotelName ?? t('fac.hotelFallback')} <span className="muted">{rows.length}</span>
       </h3>
 
-      <table className="hms">
+      <div className="table-wrap"><table className="hms">
         <thead>
           <tr>
             <th>{t('rooms.number')}</th><th>{t('res.checkin')}</th>
@@ -155,7 +155,7 @@ export function Housekeeping() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </div>
   )
 }

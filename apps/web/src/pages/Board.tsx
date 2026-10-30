@@ -252,7 +252,7 @@ export function Board() {
       {error && <p style={{ color: 'red' }}>{t('common.error')}: {error}</p>}
 
       {view === 'list' ? (
-        <table className="hms">
+        <div className="table-wrap"><table className="hms">
           <thead>
             <tr>
               <th>{t('rooms.number')}</th><th>{t('rooms.type')}</th><th>{t('res.guest')}</th>
@@ -281,7 +281,7 @@ export function Board() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       ) : (
         <>
           <div className="board-scroll">

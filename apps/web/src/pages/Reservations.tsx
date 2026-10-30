@@ -174,7 +174,7 @@ export function Reservations() {
         {total == null ? '' : t('bk.records', { n: total })} · {t(`bk.tabs.${tab}`)}
       </p>
 
-      <table className="hms">
+      <div className="table-wrap"><table className="hms">
         <thead>
           <tr>
             <th>#</th><th>{t('res.guest')}</th><th>{t('rooms.number')}</th>
@@ -208,7 +208,7 @@ export function Reservations() {
             )
           })}
         </tbody>
-      </table>
+      </table></div>
 
       <ListFooter
         first={first}

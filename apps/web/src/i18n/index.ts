@@ -34,6 +34,7 @@ const en = {
     channels: 'Channels',
     users: 'Users',
     logout: 'Sign out',
+    menu: 'Menu',
   },
   ch: {
     subtitle: 'Channel accounts connected to the hotel',

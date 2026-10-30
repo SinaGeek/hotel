@@ -514,9 +514,46 @@ html[data-theme='dark'] .modal-back { background: rgba(0, 0, 10, 0.6); }
 .chip-dirty::before { background: #3b82f6; }
 .chip.on::before { background: #fff; }
 
+/* -------------------------------------------------------------- responsive
+   Mobile-friendly layout (README §4 / todo 103): tables scroll inside their
+   card, KPIs fold to 2 columns, the sidebar becomes off-canvas behind a
+   hamburger between 641–768px, and <=640px Chrome-localhost users still get
+   full-width controls. Desktop layout is untouched above 768px. */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+.nav-burger { display: none; }
+.nav-back { display: none; }
+
+@media (max-width: 768px) {
+  .nav-burger { display: grid; }
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    height: 100vh;
+    transform: translateX(-100%);
+    transition: transform 0.18s ease-out;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
+  }
+  .sidebar.open { transform: none; }
+  .nav-back { display: block; position: fixed; inset: 0; z-index: 35; background: rgba(15, 17, 35, 0.45); }
+  .header { padding: 8px 12px; }
+  .header-left { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .user-chip > div { display: none; } /* keep only the avatar on small screens */
+  .sync-text { display: none; } /* dot still shows the sync state */
+  .page { padding: 14px 12px; }
+  .fab { right: 14px; bottom: 14px; }
+}
+
 @media (max-width: 640px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .dash-search { width: 100%; }
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .kpi b { font-size: 18px; }
+  .page h2 { font-size: 17px; }
+  .rc-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+  table.hms th, table.hms td { padding: 9px 10px; font-size: 13px; }
+  .modal { width: min(480px, 96vw); padding: 16px; }
 }
 
 /* Floor group header removed: the reference Housekeeping page is a flat

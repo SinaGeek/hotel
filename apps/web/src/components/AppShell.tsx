@@ -116,16 +116,21 @@ export function AppShell() {
 
   const initials = (session?.user.username ?? '?').slice(0, 2).toUpperCase()
 
+  // Mobile nav (README §4 responsive): the sidebar becomes off-canvas behind a
+  // hamburger at <=768px; every navigation (and backdrop tap) closes it.
+  const [navOpen, setNavOpen] = useState(false)
+  const closeNav = () => setNavOpen(false)
+
   return (
     <div className="app-shell">
-      <nav className="sidebar">
+      <nav className={`sidebar${navOpen ? ' open' : ''}`}>
         <div className="side-brand">
           <span className="logo"><IconHotel /></span>
           <span>{t('app.title')}</span>
         </div>
         <div className="side-nav">
           {singles.filter((s) => s.show).map((s) => (
-            <NavLink key={s.key} to={s.to} end={s.end} className={({ isActive }) => `side-item${isActive ? ' active' : ''}`}>
+            <NavLink key={s.key} to={s.to} end={s.end} onClick={closeNav} className={({ isActive }) => `side-item${isActive ? ' active' : ''}`}>
               {s.icon}
               <span>{t(s.label)}</span>
             </NavLink>
@@ -145,7 +150,7 @@ export function AppShell() {
               {open[g.key] && (
                 <div className="side-sub">
                   {g.items.filter((i) => i.show).map((i) => (
-                    <NavLink key={i.key} to={i.to} className={({ isActive }) => `side-item${isActive ? ' active' : ''}`}>
+                    <NavLink key={i.key} to={i.to} onClick={closeNav} className={({ isActive }) => `side-item${isActive ? ' active' : ''}`}>
                       <span>{t(i.label)}</span>
                     </NavLink>
                   ))}
@@ -155,18 +160,29 @@ export function AppShell() {
           ))}
         </div>
         <div className="side-bottom">
-          <button type="button" className="side-item" onClick={() => { auth.signOut(); navigate('/login') }}>
+          <button type="button" className="side-item" onClick={() => { closeNav(); auth.signOut(); navigate('/login') }}>
             <IconLogout />
             <span>{t('nav.logout')}</span>
           </button>
         </div>
       </nav>
+      {navOpen && <div className="nav-back" onClick={closeNav} />}
 
       <div className="content">
         <header className="header">
-          <div>
-            <div className="header-title">{hotelName ?? t('app.title')}</div>
-            <div className="header-sub">{t('shell.hotelCode', { code: hotelCode ?? '' })}</div>
+          <div className="header-left">
+            <button
+              type="button"
+              className="icon-btn nav-burger"
+              aria-label={t('nav.menu')}
+              aria-expanded={navOpen}
+              title={t('nav.menu')}
+              onClick={() => setNavOpen((v) => !v)}
+            ><IconList /></button>
+            <div>
+              <div className="header-title">{hotelName ?? t('app.title')}</div>
+              <div className="header-sub">{t('shell.hotelCode', { code: hotelCode ?? '' })}</div>
+            </div>
           </div>
           <div className="header-right">
             <SyncStatusPill />

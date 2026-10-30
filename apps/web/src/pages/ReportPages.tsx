@@ -215,7 +215,7 @@ export function ReportsForecast() {
         ))}
         <button className="primary" disabled={busy} onClick={() => void load()}>{busy ? t('common.loading') : t('reports.refresh')}</button>
       </div>
-      <table className="hms">
+      <div className="table-wrap"><table className="hms">
         <thead>
           <tr>
             <th>{t('rep.forecast.date')}</th><th>{t('rep.forecast.arrivals')}</th><th>{t('rep.forecast.occupied')}</th>
@@ -241,7 +241,7 @@ export function ReportsForecast() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </div>
   )
 }
@@ -311,7 +311,7 @@ export function ReportsInhouse() {
       )}
 
       {view === 'table' && (
-        <table className="hms">
+        <div className="table-wrap"><table className="hms">
           <thead>
             <tr>
               <th>{t('res.guest')}</th><th>{t('rooms.number')}</th><th>{t('rooms.type')}</th>
@@ -335,7 +335,7 @@ export function ReportsInhouse() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
       {view === 'chart' && (
         <div style={{ height: Math.max(240, chartData.length * 36) }}>
@@ -401,7 +401,7 @@ export function ReportsMainCourante() {
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
         {t('bk.records', { n: rep?.count ?? 0 })} · {date}
       </p>
-      <table className="hms">
+      <div className="table-wrap"><table className="hms">
         <thead>
           <tr>
             <th>{t('res.guest')}</th><th>{t('rooms.number')}</th><th>{t('res.checkin')}</th><th>{t('res.checkout')}</th>
@@ -425,7 +425,7 @@ export function ReportsMainCourante() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </div>
   )
 }

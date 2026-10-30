@@ -69,7 +69,7 @@ export function Channels() {
         </button>
       </FilterBar>
 
-      <table className="hms">
+      <div className="table-wrap"><table className="hms">
         <thead>
           <tr>
             <th>{t('ch.channel')}</th><th>{t('ch.kind')}</th><th>{t('res.status')}</th>
@@ -92,7 +92,7 @@ export function Channels() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </div>
   )
 }

@@ -46,7 +46,7 @@ export function Users() {
     <div className="page">
       <h2>{t('users.title')}</h2>
       {error && <p style={{ color: 'red' }}>{t('common.error')}: {error}</p>}
-      <table className="hms">
+      <div className="table-wrap"><table className="hms">
         <thead><tr><th>{t('login.username')}</th><th>{t('users.fullName')}</th><th>{t('users.role')}</th><th>{t('users.active')}</th></tr></thead>
         <tbody>
           {users.map((u) => (
@@ -58,7 +58,7 @@ export function Users() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
 
       {canManage && (
         <form className="card row" style={{ marginTop: 12 }} onSubmit={create}>

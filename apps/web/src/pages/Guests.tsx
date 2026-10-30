@@ -130,7 +130,7 @@ export function Guests() {
         </button>
       </FilterBar>
 
-      <table className="hms">
+      <div className="table-wrap"><table className="hms">
         <thead>
           <tr>
             <th>#</th><th>{t('gu.fullName')}</th><th>{t('gu.nationality')}</th>
@@ -157,7 +157,7 @@ export function Guests() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
 
       {showAdd && canCreate && (
         <form className="card row" style={{ marginTop: 12 }} onSubmit={create}>

@@ -65,7 +65,7 @@ export function Rooms() {
         <button className="ghost" disabled={status === ''} onClick={() => setStatus('')}>{t('bk.clear')}</button>
       </FilterBar>
 
-      <table className="hms">
+      <div className="table-wrap"><table className="hms">
         <thead>
           <tr>
             <th>{t('rooms.number')}</th><th>{t('rooms.type')}</th>
@@ -93,7 +93,7 @@ export function Rooms() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </div>
   )
 }
