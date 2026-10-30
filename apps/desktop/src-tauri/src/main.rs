@@ -12,6 +12,7 @@
 mod dpapi;
 mod local_store;
 mod offline;
+mod reports;
 
 use hms_sync::engine::{SyncEngine, SyncFailure, SyncOutcome};
 use hms_sync::store::{StoreError, SyncStore};
@@ -107,6 +108,30 @@ async fn offline_login(
         }
         offline::OfflineAuth::BadPassword => Err("wrong password".into()),
     }
+}
+
+/// Offline report reads from the local mirror (README §10 / todo 201): the
+/// webview calls this when the REST endpoints are unreachable. Returns the
+/// four aggregates in one payload (`summary`, `by_day`, `by_channel`,
+/// `by_room`) with the REST DTO field names.
+#[tauri::command]
+async fn offline_reports(
+    state: tauri::State<'_, AppState>,
+    from: String,
+    to: String,
+) -> Result<serde_json::Value, String> {
+    let Some(f) = chrono::NaiveDate::parse_from_str(&from, "%Y-%m-%d").ok() else {
+        return Err("invalid from date".into());
+    };
+    let Some(t) = chrono::NaiveDate::parse_from_str(&to, "%Y-%m-%d").ok() else {
+        return Err("invalid 'to' date".into());
+    };
+    let mut store = LocalStore::open(&state.db_path).map_err(|e| e.to_string())?;
+    let hotel_id = store.hotel_id().map_err(|e| e.to_string())?;
+    if hotel_id == 0 {
+        return Err("no hotel logged in on this device; sign in online once first".into());
+    }
+    reports::compute(&store, f, t)
 }
 
 /// Manual sync trigger (the worker also runs every SYNC_INTERVAL_SECS).
@@ -258,6 +283,7 @@ async fn main() {
             set_auth_token,
             remember_offline_credentials,
             offline_login,
+            offline_reports,
             sync_now
         ])
         .setup(move |_app| {
