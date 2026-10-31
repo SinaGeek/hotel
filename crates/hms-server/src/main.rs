@@ -266,11 +266,14 @@ async fn health_check(
             data: "HMS Server is running (db ok)".to_string(),
             error: None,
         }),
-        Err(e) => Json(ApiResponse {
-            success: false,
-            data: String::new(),
-            error: Some(format!("db error: {e}")),
-        }),
+        Err(error) => {
+            tracing::error!(%error, "health check database probe failed");
+            Json(ApiResponse {
+                success: false,
+                data: String::new(),
+                error: Some("database unavailable".to_owned()),
+            })
+        }
     }
 }
 
