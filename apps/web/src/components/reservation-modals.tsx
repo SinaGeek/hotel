@@ -1,6 +1,6 @@
 // Shared reservation modals (5b.3): the board and the dashboard both need
 // drag/click-to-create and a reservation detail view, so they live here.
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, sessionHasPermission, ApiError } from '../api/client'
 import { useAuth } from '../api/auth'
@@ -114,7 +114,7 @@ export function ReservationDetailModal(props: { id: string; onClose: () => void;
   const [payments, setPayments] = useState<{ id: string; amount_cents: number; payment_type: string; is_reversal: boolean }[]>([])
   const [folio, setFolio] = useState<{ id: string; category: string; description: string; total_cents: number }[]>([])
 
-  async function refresh() {
+  const refresh = useCallback(async function refresh() {
     try {
       setRes(await api.getReservation(props.id))
       setPayments(await api.listPayments(props.id))
@@ -122,8 +122,8 @@ export function ReservationDetailModal(props: { id: string; onClose: () => void;
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     }
-  }
-  useEffect(() => { void refresh() }, [props.id])
+  }, [props.id])
+  useEffect(() => { void refresh() }, [refresh])
 
   async function status(action: 'checkIn' | 'checkOut' | 'cancelReservation') {
     if (action === 'cancelReservation' && !confirm(t('res.cancel') + '?')) return

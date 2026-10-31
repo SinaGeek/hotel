@@ -27,8 +27,10 @@ All paths below are prefixed `/api/v1` and require authentication unless a handl
 | PATCH | `/room-types/{id}` | Update a room type. |
 | GET, POST | `/rooms` | List/create rooms. |
 | PATCH | `/rooms/{id}/cleanliness` | Update cleanliness. |
-| GET, POST | `/guests` | List/create guests. |
+| GET, POST | `/guests` | List/create guests. Create encrypts `id_number`, `phone`, and `email` at rest (XChaCha20Poly1305, `GUEST_FIELD_ENCRYPTION_KEY`). |
 | PATCH | `/guests/{id}` | Update a guest. |
+| GET | `/guests/{id}/export` | GDPR export: full guest record with decrypted identity fields. Requires `guest_export`. |
+| DELETE | `/guests/{id}` | GDPR deletion: soft-delete and anonymize personal data. Requires `guest_delete`. |
 | GET, POST | `/reservations` | Keyset-paginated list/create. |
 | GET | `/reservations/count` | Count matching reservations. |
 | GET, PATCH | `/reservations/{id}` | Read/update a reservation. |
