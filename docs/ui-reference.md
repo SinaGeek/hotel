@@ -112,18 +112,15 @@ All endpoints under `app.hmsflow.com`; full paths + per-page details in `docs/ap
   `/apiv2/currency-exchange`, `/apiv2/application*`.
 - **Notifications `/notifications`**, **Help `/help`** (third-party chat widget - out of scope).
 
-## Comparative gap vs our `apps/web` (state 2026-10-28)
+## Comparative gap vs our `apps/web`
 
-1. Frame: we have a plain white top nav; reference is dark icon/label sidebar + hotel header,
-   dark-mode toggle, notifications, language menu.
-2. Board: our Board.tsx covers monthly-room's core but lacks the reference's range toggles,
-   price rows per room type, channel-colored bars, legend, list view, drag-to-create.
-3. Data-table system: reference repeats one list-page pattern (title+count, filter pills,
-   card table, pills, pagination footer); we hand-roll tables ad hoc.
-4. Missing whole modules even as API-backed UI: bookings tabs, reports hub + per-report KPIs,
-   periodic channel-managed pricing surfaces, channels staff/settings/tools hubs.
-5. Positive confirmations: statuses, pagination conventions (order=-id, limit/page),
-   and current date logic match what we already built in the server.
+Historical captures above were taken 2026-10-28. Follow-up implementation through 2026-10-31:
+
+- **Implemented:** dark icon/label sidebar + hotel header/theme controls; Monthly Room calendar/list, range pager and drag-to-create; Dashboard suggestions/chips/room cards/stats; Bookings list tabs and Guests list; Facility/Rooms/Housekeeping/inline cleanliness; Channels/Staff; Reports hub/analysis pages with daily/monthly charts, KPIs, CSV/print and Accrued-vs-Collected basis; English-only responsive layout including off-canvas mobile navigation and horizontally scrollable tables. See `todo.md` and `docs/server-api.md` for implementation status.
+- **Cosmetic pass 1:** Dashboard and Reports got reference styling refinements in commit `2439feb` (room-card density, colored status dots, lavender booking action, icon stat cards, report toggle/monthly card). The remaining style-match item is still open; no claim is made that every list page is pixel-matched.
+- **Intentionally deferred/out of scope:** invoices, stock/expenses, agency currents, currency exchange, channel-booking imports/deep channel-manager sync, settings/application store, messaging/notifications/help integrations. These need separate domain models or external integrations and are not represented as completed UI.
+- **Responsive verification:** 375px/700px same-origin iframe checks were used on 2026-10-30 for Dashboard, Reports, Reservations, and Monthly Room. This was local-app validation, not a fresh live REA capture.
+- **Positive confirmations from the original capture:** status vocabulary, pagination conventions and date-range semantics informed the server/UI mapping; current tenant scope remains token-derived rather than trusting body hotel IDs.
 
 ## Implementation decision (recorded)
 
