@@ -17,6 +17,7 @@ All paths below are prefixed `/api/v1` and require authentication unless a handl
 
 | Method | Path | Notes |
 |---|---|---|
+| GET, POST | `/audit` | List audit log entries. Requires `audit_log_view`. |
 | GET, POST | `/hotels` | List/create hotels (admin scope enforced by handlers). |
 | GET, PATCH | `/hotels/{id}` | Read/update a hotel. |
 | GET, POST | `/users` | List/create hotel users. |
@@ -28,7 +29,7 @@ All paths below are prefixed `/api/v1` and require authentication unless a handl
 | GET, POST | `/rooms` | List/create rooms. |
 | PATCH | `/rooms/{id}/cleanliness` | Update cleanliness. |
 | GET, POST | `/guests` | List/create guests. Create encrypts `id_number`, `phone`, and `email` at rest (XChaCha20Poly1305, `GUEST_FIELD_ENCRYPTION_KEY`). |
-| PATCH | `/guests/{id}` | Update a guest. |
+| PATCH | `/guests/{id}` | Update a guest (full guest body, re-encrypts identity fields). |
 | GET | `/guests/{id}/export` | GDPR export: full guest record with decrypted identity fields. Requires `guest_export`. |
 | DELETE | `/guests/{id}` | GDPR deletion: soft-delete and anonymize personal data. Requires `guest_delete`. |
 | GET, POST | `/reservations` | Keyset-paginated list/create. |
