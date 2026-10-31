@@ -63,13 +63,16 @@ async fn main() {
         .expect("bootstrap failed");
     tracing::info!("bootstrap ensured");
 
+    let session_secret = session_secret_for(
+        std::env::var("SESSION_SECRET").ok().as_deref(),
+        std::env::var("APP_ENV")
+            .map(|v| v.eq_ignore_ascii_case("production"))
+            .unwrap_or(false),
+    )
+    .expect("invalid SESSION_SECRET configuration");
     let state = AppState {
         db,
-        session_secret: std::env::var("SESSION_SECRET").unwrap_or_else(|_| {
-            let generated = uuid::Uuid::new_v4().to_string();
-            tracing::warn!("SESSION_SECRET not set; using a random value (sessions invalidated on restart): set SESSION_SECRET in .env for persistence");
-            generated
-        }),
+        session_secret,
         rate_limiter: Arc::new(tokio::sync::Mutex::new(rate_limiter::RateLimiter::new(
             std::env::var("RATE_LIMIT_LOGIN").ok().and_then(|v| v.parse().ok()).unwrap_or(10),
             60_000,
@@ -115,6 +118,22 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
     tracing::info!("HMS Server listening on 0.0.0.0:8080");
     axum::serve(listener, app).await.unwrap();
+}
+
+fn session_secret_for(configured: Option<&str>, production: bool) -> Result<String, String> {
+    match configured.filter(|v| !v.trim().is_empty()) {
+        Some(secret) if secret.as_bytes().len() >= 32 => Ok(secret.to_owned()),
+        Some(_) => Err("SESSION_SECRET must be at least 32 bytes".to_owned()),
+        None if production => Err("SESSION_SECRET must be set in production".to_owned()),
+        None => {
+            use rand::RngCore;
+            let mut bytes = [0u8; 32];
+            rand::thread_rng().fill_bytes(&mut bytes);
+            let generated = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            tracing::warn!("SESSION_SECRET not set; using an ephemeral development value; sessions invalidate on restart");
+            Ok(generated)
+        }
+    }
 }
 
 fn security_headers() -> tower::ServiceBuilder<
@@ -257,7 +276,7 @@ async fn health_check(
 
 #[cfg(test)]
 mod cors_tests {
-    use super::{parse_cors_origins, security_headers};
+    use super::{parse_cors_origins, security_headers, session_secret_for};
 
     async fn security_header_probe() -> axum::http::StatusCode {
         axum::http::StatusCode::OK
@@ -281,6 +300,14 @@ mod cors_tests {
         assert_eq!(response.headers()["referrer-policy"], "no-referrer");
         assert_eq!(response.headers()["permissions-policy"], "camera=(), microphone=(), geolocation=()");
         assert_eq!(response.headers()["content-security-policy"], "default-src 'none'; frame-ancestors 'none'");
+    }
+
+    #[test]
+    fn session_secret_requires_stable_strong_value_in_production() {
+        assert!(session_secret_for(None, true).is_err());
+        assert!(session_secret_for(Some("short"), false).is_err());
+        assert_eq!(session_secret_for(Some(&"x".repeat(32)), true).unwrap().len(), 32);
+        assert_eq!(session_secret_for(Some(""), false).unwrap().len(), 64);
     }
 
     #[test]
