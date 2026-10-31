@@ -7,7 +7,7 @@ It merges two existing products into one:
 - **app.hmsflow.com**: the visual reference for the UI (layout, navigation, colors, component style). The UI is original code.
 - **app.hms.gen.tr** (HMS Hotel Software): every feature it offers must exist in this system.
 
-> **Status:** this README describes the target design and planned repository layout. Commands, endpoints and paths below are the intended interfaces; implement and verify them as the project is built. Section 4's feature inventory was verified against site 2 on 2026-10-27 — details and screenshots in `docs/feature-inventory.md`.
+> **Status (2026-10-31):** the core Rust/Axum server, Postgres migrations, React/Vite web app, reporting endpoints, versioned sync engine, Tauri desktop shell, SQLite mirror, and Windows MSI packaging are implemented. `docs/server-api.md` is the source-derived route snapshot; `docs/feature-inventory.md` is the site-2 inventory. Remaining limitations include SQLCipher (desktop uses bundled SQLite + DPAPI-protected secrets), full local-first write support/offline report parity, OpenAPI/TS type generation, production CORS/TLS/deployment hardening, and the Tauri auto-updater (signing/manifest setup pending). See `todo.md` for the current checklist.
 
 ---
 
@@ -349,33 +349,36 @@ Proof: a k6 load test against seed data of 1,000 hotels x 50 rooms x 2 years of 
 
 ## 14. Getting started
 
-Intended workflow (prerequisites: Rust toolchain, Node.js with pnpm, Docker, and the Tauri 2 Windows prerequisites for the desktop app):
+Verified development workflow (prerequisites: Rust toolchain, Node.js with pnpm, Docker, and the Tauri 2 Windows prerequisites for desktop builds):
 
 ```bash
-# 1. Configure
-cp .env.example .env            # set DATABASE_URL, session secret, admin bootstrap password
+# 1. Configure local development environment
+cp .env.example .env
+# Set DATABASE_URL, SESSION_SECRET, and ADMIN_BOOTSTRAP_PASSWORD in .env.
 
-# 2. Start database + server
-docker compose up -d
-cargo run -p hms-server         # runs migrations on start
+# 2. Start PostgreSQL (Compose does not start the Rust server)
+docker compose up -d db
 
-# 3. Web app
+# 3. Start the API server in one terminal (applies PostgreSQL migrations on startup)
+cargo run -p hms-server
+
+# 4. Start the web app in another terminal
 cd apps/web
 pnpm install
 pnpm dev
 
-# 4. Seed demo data (optional, large)
-cargo run -p hms-seed -- --hotels 1000 --rooms 50 --years 2
+# 5. Optional: seed the load-test hotel (destructive to hotel 4443 only)
+psql "$DATABASE_URL" -f ../../seed/loadtest.sql
 
-# 5. Desktop app (Windows)
-cd apps/desktop
-pnpm tauri dev
-pnpm tauri build                # produces the .msi installer
+# 6. Windows desktop app (install the Tauri CLI; from the Tauri crate directory)
+cd apps/desktop/src-tauri
+cargo tauri dev
+cargo tauri build               # emits the MSI bundle; auto-update is not configured
 ```
 
-First login: hotel ID `0`, username `admin`, the bootstrap password from `.env`. You will be forced to change it. Then create hotels, and for each hotel a manager, reception and housekeeping users.
+First login: hotel ID `0`, username `admin`, and the bootstrap password from `.env`; a forced password change is required. The `seed/loadtest.sql` script creates the separate load-test hotel 4443; it is not a general-purpose 1,000-hotel seed generator.
 
-Build order: server and web app first (with the sync-ready data model), then the desktop app.
+The server and web workflow is verified. Desktop MSI packaging is implemented; release signing and auto-update feed/manifest are not configured. Production deployment still requires CORS/TLS/security-header hardening and operational controls listed in sections 17 and `todo.md`.
 
 ---
 

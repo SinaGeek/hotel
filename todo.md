@@ -233,7 +233,7 @@ Goal: restyle/extend `apps/web` to match the reference hotel app's frame and pat
 - [ ] Encrypt sensitive guest fields at rest (models have `*_encrypted` fields â€” no key management exists)
 - [ ] Rate limiting actually enforced (middleware is a pass-through today)
 - [ ] Production CORS lockdown, TLS termination, security headers
-- [ ] Ensure reference-site credentials (`SITE1_*`, `SITE2_*`) stay only in env â€” never in code/logs/commits (verify the captured `flow_*.js`/`inspect_*.py` contain no secrets)
+- [x] Ensure reference-site credentials (`SITE1_*`, `SITE2_*`) stay only in env — never in code/logs/commits (verify the captured `flow_*.js`/`inspect_*.py` contain no secrets) — **verified 2026-10-31 (bounded scan)**: tracked `flow_*.js` keyword hits are minified bundle identifiers/code; `inspect_*.py` has no credential-key hits; no literal credential assignment candidates found; `.env.example` only documents `SITE2_HOTEL_CODE`, `SITE2_USERNAME`, `SITE2_PASSWORD` environment names. No secrets were output or copied. This is a text-pattern check, not proof against arbitrary encoding/obfuscation.
 
 ## 11. Deployment & operations (README Â§17) â€” [P2]
 
@@ -244,8 +244,8 @@ Goal: restyle/extend `apps/web` to match the reference hotel app's frame and pat
 
 ## 12. Documentation (README Â§5) â€” [P2]
 
-- [ ] `docs/`: API reference, sync protocol spec, design decisions
-- [ ] Keep README Â§4 inventory and Â§14 commands truthful as implementation lands (README currently states commands/endpoints are "intended interfaces" not yet verified)
+- [x] `docs/`: API reference, sync protocol spec, design decisions — `docs/apis.md` contains captured reference-site endpoint inventory; `docs/feature-inventory.md` records site-2 feature scope; `docs/ui-reference.md` records REA-derived visual decisions; added source-derived HMS API route/sync contract in `docs/server-api.md` (2026-10-31, commit pending).
+- [x] Keep README section 4 inventory and section 14 commands truthful — updated 2026-10-31: status now distinguishes implemented core from remaining gaps; startup commands match Compose service `db`, actual `seed/loadtest.sql` (no `hms-seed` crate), server startup migrations, and Tauri CLI directory. Route snapshot is in `docs/server-api.md`. Revisit as features land.
 
 ## 13. Roadmap / future (README Â§18) â€” [P2]
 
