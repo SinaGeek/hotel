@@ -12,6 +12,7 @@ pub const PERMISSIONS: &[Permission] = {
         FinancialView, PaymentRecord, PaymentRefund, FolioManage,
         HousekeepingView, HousekeepingUpdateStatus,
         ReportViewTenant, ReportViewPlatform, AuditLogView,
+        GuestExport, GuestDelete,
     ]
 };
 
@@ -88,6 +89,9 @@ pub enum Permission {
 
     // Audit
     AuditLogView,
+    // Guest data (GDPR)
+    GuestExport,
+    GuestDelete,
 }
 
 impl Permission {
@@ -118,6 +122,8 @@ impl Permission {
             Permission::ReportViewTenant => "report_view_tenant",
             Permission::ReportViewPlatform => "report_view_platform",
             Permission::AuditLogView => "audit_log_view",
+            Permission::GuestExport => "guest_export",
+            Permission::GuestDelete => "guest_delete",
         }
     }
 
@@ -147,6 +153,8 @@ impl Permission {
             "report_view_tenant" => Permission::ReportViewTenant,
             "report_view_platform" => Permission::ReportViewPlatform,
             "audit_log_view" => Permission::AuditLogView,
+            "guest_export" => Permission::GuestExport,
+            "guest_delete" => Permission::GuestDelete,
             _ => return None,
         })
     }
@@ -185,6 +193,8 @@ impl Role {
                     | Permission::HousekeepingUpdateStatus
                     | Permission::ReportViewTenant
                     | Permission::AuditLogView
+                    | Permission::GuestExport
+                    | Permission::GuestDelete
             ),
             Role::Reception => matches!(
                 perm,
