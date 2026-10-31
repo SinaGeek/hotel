@@ -7,6 +7,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{routing::{get, patch}, Json, Router};
 use hms_core::ApiResponse;
+use hms_core::guest_identity::encrypt_option_guest_field;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -81,6 +82,15 @@ async fn create(
     }
     let id = Uuid::now_v7();
     let op_id = Uuid::now_v7();
+    let id_number_encrypted =
+        encrypt_option_guest_field(body.id_number.as_deref())
+            .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("id number encryption failed: {e}")))?;
+    let phone_encrypted =
+        encrypt_option_guest_field(body.phone.as_deref())
+            .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("phone encryption failed: {e}")))?;
+    let email_encrypted =
+        encrypt_option_guest_field(body.email.as_deref())
+            .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("email encryption failed: {e}")))?;
     let mut conn = state.db.begin().await.map_err(ApiError::from)?;
     db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
     sqlx::query(
@@ -92,9 +102,9 @@ async fn create(
     .bind(id)
     .bind(auth.hotel_id)
     .bind(&body.full_name)
-    .bind(body.id_number.clone())
-    .bind(body.phone.clone())
-    .bind(body.email.clone())
+    .bind(&id_number_encrypted)
+    .bind(&phone_encrypted)
+    .bind(&email_encrypted)
     .bind(&body.nationality)
     .bind(&body.license_plate)
     .bind(body.birth_date)

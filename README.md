@@ -390,6 +390,7 @@ Set in `.env` (never commit real values):
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string |
 | `SESSION_SECRET` | signs sessions/tokens; production requires at least 32 bytes (`openssl rand -hex 32`) |
+| `GUEST_FIELD_ENCRYPTION_KEY` | encrypts guest identity fields at rest; base64-encoded 32 bytes (`openssl rand -hex 32`) |
 | `APP_ENV` | Set `production` to disable development localhost CORS defaults |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated exact HTTP(S) origins; production should list the HTTPS web origin(s), no wildcard or paths |
 | `ADMIN_BOOTSTRAP_PASSWORD` | initial password for `admin` on hotel 0 (forced change on first login) |

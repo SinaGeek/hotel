@@ -14,6 +14,7 @@ apps/web/dist/
 .env
 .env.*
 !.env.example
+userpass.md
 
 # Captured reference-site artifacts (may contain data, keep out of history)
 *.min.js.bak
