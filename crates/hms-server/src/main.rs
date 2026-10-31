@@ -107,6 +107,35 @@ async fn main() {
             )),
         )
         .layer(cors)
+        .layer(security_headers())
+        // README §13: compress JSON responses (gzip/br) — big win for board/report payloads
+        .layer(CompressionLayer::new())
+        .with_state(state);
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    tracing::info!("HMS Server listening on 0.0.0.0:8080");
+    axum::serve(listener, app).await.unwrap();
+}
+
+fn security_headers() -> tower::ServiceBuilder<
+    tower::layer::util::Stack<
+        SetResponseHeaderLayer<axum::http::HeaderValue>,
+        tower::layer::util::Stack<
+            SetResponseHeaderLayer<axum::http::HeaderValue>,
+            tower::layer::util::Stack<
+                SetResponseHeaderLayer<axum::http::HeaderValue>,
+                tower::layer::util::Stack<
+                    SetResponseHeaderLayer<axum::http::HeaderValue>,
+                    tower::layer::util::Stack<
+                        SetResponseHeaderLayer<axum::http::HeaderValue>,
+                        tower::layer::util::Identity,
+                    >,
+                >,
+            >,
+        >,
+    >,
+> {
+    tower::ServiceBuilder::new()
         .layer(SetResponseHeaderLayer::if_not_present(
             axum::http::header::X_CONTENT_TYPE_OPTIONS,
             axum::http::HeaderValue::from_static("nosniff"),
@@ -127,13 +156,6 @@ async fn main() {
             axum::http::header::CONTENT_SECURITY_POLICY,
             axum::http::HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
         ))
-        // README §13: compress JSON responses (gzip/br) — big win for board/report payloads
-        .layer(CompressionLayer::new())
-        .with_state(state);
-
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
-    tracing::info!("HMS Server listening on 0.0.0.0:8080");
-    axum::serve(listener, app).await.unwrap();
 }
 
 /// Read exact allowed origins from `CORS_ALLOWED_ORIGINS` (comma-separated).
@@ -235,7 +257,31 @@ async fn health_check(
 
 #[cfg(test)]
 mod cors_tests {
-    use super::parse_cors_origins;
+    use super::{parse_cors_origins, security_headers};
+
+    async fn security_header_probe() -> axum::http::StatusCode {
+        axum::http::StatusCode::OK
+    }
+
+    #[tokio::test]
+    async fn security_headers_are_attached_to_responses() {
+        use axum::routing::get;
+        use tower::ServiceExt;
+
+        let app = axum::Router::new()
+            .route("/probe", get(security_header_probe))
+            .layer(security_headers());
+        let response = app
+            .oneshot(axum::http::Request::builder().uri("/probe").body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(response.headers()["x-frame-options"], "DENY");
+        assert_eq!(response.headers()["referrer-policy"], "no-referrer");
+        assert_eq!(response.headers()["permissions-policy"], "camera=(), microphone=(), geolocation=()");
+        assert_eq!(response.headers()["content-security-policy"], "default-src 'none'; frame-ancestors 'none'");
+    }
 
     #[test]
     fn accepts_only_exact_http_origins() {
