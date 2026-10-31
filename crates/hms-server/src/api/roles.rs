@@ -1,7 +1,6 @@
 //! Roles + permission matrix (admin only: view matrix; edit via PUT per role)
 use super::{ApiError, AResult};
 use crate::auth::AuthUser;
-use crate::db;
 use crate::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;

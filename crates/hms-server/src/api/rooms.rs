@@ -5,7 +5,7 @@ use crate::db;
 use crate::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::{routing::{get, patch, post}, Json, Router};
+use axum::{routing::{get, patch}, Json, Router};
 use hms_core::ApiResponse;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

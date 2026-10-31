@@ -10,12 +10,11 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
-use getrandom::getrandom;
 use std::sync::Mutex;
 
 /// Guards the process-global `GUEST_FIELD_ENCRYPTION_KEY` env var so tests
 /// that swap it cannot race with concurrent encryption/decryption.
-static KEY_ENV_MUTEX: Mutex<()> = Mutex::new(());
+pub(crate) static KEY_ENV_MUTEX: Mutex<()> = Mutex::new(());
 
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 24;

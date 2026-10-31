@@ -1,6 +1,6 @@
 //! Authentication: login (hotel id + username + password), JWT sessions,
 //! change-password, logout. Permissions REQUIRED for tenant RLS scope.
-use crate::{auth, AppState};
+use crate::AppState;
 use argon2::password_hash::PasswordVerifier;
 use argon2::{Argon2, PasswordHasher};
 use axum::extract::FromRequestParts;
@@ -107,7 +107,6 @@ pub async fn has_permission(pool: &PgPool, role: &str, hotel_id: i64, perm: hms_
 }
 
 // in ApiError
-use crate::api::ApiError;
 
 pub fn router() -> Router<AppState> {
     Router::new()

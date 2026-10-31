@@ -33,19 +33,26 @@ async fn list(State(state): State<AppState>, auth: AuthUser) -> AResult<Json<Api
     .await
     .map_err(ApiError::from)?;
 
-    if rows.is_empty() {
-        // first-touch seeding of the standard channels for this hotel
+    // First-touch seeding: add any missing standard channels for this hotel
+    let existing_kinds: Vec<String> = rows.iter().map(|r| r.kind.clone()).collect();
+    let standard_channels = [
+        ("direct", "Direct"),
+        ("walk_in", "Walk-in"),
+        ("booking_com", "Booking.com"),
+        ("expedia", "Expedia"),
+        ("agency", "Agency"),
+        ("other", "Other"),
+    ];
+    let missing: Vec<_> = standard_channels
+        .iter()
+        .filter(|(kind, _)| !existing_kinds.contains(&kind.to_string()))
+        .collect();
+
+    if !missing.is_empty() {
         let op_id = Uuid::now_v7();
         let mut conn = state.db.begin().await.map_err(ApiError::from)?;
         db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
-        for (kind, name) in [
-            ("direct", "Direct"),
-            ("walk_in", "Walk-in"),
-            ("booking_com", "Booking.com"),
-            ("expedia", "Expedia"),
-            ("agency", "Agency"),
-            ("other", "Other"),
-        ] {
+        for (kind, name) in missing {
             let id = Uuid::now_v7();
             sqlx::query("INSERT INTO channels (id, hotel_id, kind, name) VALUES ($1,$2,$3,$4)")
                 .bind(id)

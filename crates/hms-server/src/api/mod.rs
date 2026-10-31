@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod channels;
 pub mod guests;
 pub mod hotels;
@@ -43,6 +44,7 @@ impl From<hms_core::validation::ValidationError> for ApiError {
 
 pub fn router() -> axum::Router<crate::AppState> {
     axum::Router::new()
+        .nest("/audit", audit::router())
         .nest("/hotels", hotels::router())
         .nest("/users", users::router())
         .nest("/roles", roles::router())

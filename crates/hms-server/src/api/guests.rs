@@ -15,12 +15,57 @@ use uuid::Uuid;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list).post(create))
-        .route("/{id}", patch(patrol).delete(delete))
+        .route("/{id}", patch(update).delete(delete))
         .route("/{id}/export", get(export))
 }
 
-async fn patrol() -> Json<ApiResponse<()>> {
-    Json(ApiResponse { success: false, data: (), error: Some("PATCH /guests/{id} arrives in the next batch".into()) })
+async fn update(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<CreateGuestBody>,
+) -> AResult<Json<ApiResponse<()>>> {
+    if !crate::auth::has_permission(&state.db, &auth.role, auth.hotel_id, hms_core::roles::Permission::ReservationEdit).await? {
+        return Err(ApiError(StatusCode::FORBIDDEN, "reservation_edit required".into()));
+    }
+    let op_id = Uuid::now_v7();
+    let id_number_encrypted =
+        encrypt_option_guest_field(body.id_number.as_deref())
+            .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("id number encryption failed: {e}")))?;
+    let phone_encrypted =
+        encrypt_option_guest_field(body.phone.as_deref())
+            .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("phone encryption failed: {e}")))?;
+    let email_encrypted =
+        encrypt_option_guest_field(body.email.as_deref())
+            .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("email encryption failed: {e}")))?;
+    let mut conn = state.db.begin().await.map_err(ApiError::from)?;
+    db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
+    let result = sqlx::query(
+        r#"UPDATE guests
+              SET full_name = $1, id_number_encrypted = $2, phone_encrypted = $3, email_encrypted = $4,
+                  nationality = $5, license_plate = $6, birth_date = $7, updated_at = $8
+            WHERE id = $9 AND hotel_id = $10 AND deleted_at IS NULL"#,
+    )
+    .bind(&body.full_name)
+    .bind(&id_number_encrypted)
+    .bind(&phone_encrypted)
+    .bind(&email_encrypted)
+    .bind(&body.nationality)
+    .bind(&body.license_plate)
+    .bind(&body.birth_date)
+    .bind(Utc::now())
+    .bind(id)
+    .bind(auth.hotel_id)
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("cannot update guest: {e}")))?;
+    if result.rows_affected() == 0 {
+        return Err(ApiError(StatusCode::NOT_FOUND, "guest not found".into()));
+    }
+    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "guest", id, "update", serde_json::json!({})).await?;
+    db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "guest", id, "updated", None, Some(serde_json::json!({}))).await?;
+    conn.commit().await.map_err(ApiError::from)?;
+    Ok(Json(ApiResponse { success: true, data: (), error: None }))
 }
 
 /// Full guest record including decrypted identity fields (GDPR export).

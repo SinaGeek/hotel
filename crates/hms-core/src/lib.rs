@@ -1,5 +1,6 @@
 pub mod api_types;
 pub mod guest_identity;
+pub mod key_rotation;
 pub mod models;
 pub mod roles;
 pub mod sync;
