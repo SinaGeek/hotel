@@ -11,6 +11,11 @@ use base64::Engine;
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use getrandom::getrandom;
+use std::sync::Mutex;
+
+/// Guards the process-global `GUEST_FIELD_ENCRYPTION_KEY` env var so tests
+/// that swap it cannot race with concurrent encryption/decryption.
+static KEY_ENV_MUTEX: Mutex<()> = Mutex::new(());
 
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 24;
@@ -21,6 +26,7 @@ fn env_key_name() -> &'static str {
 
 /// Read and validate the guest field encryption key from the environment.
 pub fn guest_field_encryption_key() -> Result<Vec<u8>, String> {
+    let _guard = KEY_ENV_MUTEX.lock().unwrap();
     let value = std::env::var(env_key_name()).map_err(|_| {
         format!(
             "{} is not set; set it to a base64-encoded 32-byte key",
@@ -84,8 +90,13 @@ pub fn decrypt_option_guest_field(ciphertext: Option<&str>) -> Result<Option<Str
 mod tests {
     use super::*;
 
+    fn set_env_key(value: String) {
+        let _guard = KEY_ENV_MUTEX.lock().unwrap();
+        std::env::set_var(env_key_name(), value);
+    }
+
     fn set_key() {
-        std::env::set_var(env_key_name(), STANDARD.encode(&[0x42u8; KEY_LEN]));
+        set_env_key(STANDARD.encode(&[0x42u8; KEY_LEN]));
     }
 
     #[test]
@@ -117,7 +128,7 @@ mod tests {
     fn wrong_key_fails() {
         set_key();
         let ct = encrypt_guest_field("secret").unwrap();
-        std::env::set_var(env_key_name(), STANDARD.encode(&[0x43u8; KEY_LEN]));
+        set_env_key(STANDARD.encode(&[0x43u8; KEY_LEN]));
         assert!(decrypt_guest_field(&ct).is_err());
     }
 
@@ -135,7 +146,7 @@ mod tests {
 
     #[test]
     fn short_key_is_rejected() {
-        std::env::set_var(env_key_name(), STANDARD.encode(&[0u8; 33]));
+        set_env_key(STANDARD.encode(&[0u8; 33]));
         assert!(guest_field_encryption_key().is_err());
     }
 }
