@@ -240,7 +240,7 @@ Goal: restyle/extend `apps/web` to match the reference hotel app's frame and pat
 - [ ] Container image for the server behind a TLS-terminating reverse proxy
 - [ ] PostgreSQL automated backups + replication (desktop copy is explicitly not a backup)
 - [ ] Monitoring: p95/p99 latency, error rate, sync lag per hotel, DB connections, slow queries
-- [ ] Migration runbook (server start = Postgres migrations, app start = SQLite migrations)
+- [x] Migration runbook (server start = Postgres migrations; desktop `LocalStore::open` applies idempotent `0001_init.sql`) — documented current behavior and caveats in `docs/migration-runbook.md`; SQLite versioned migration ledger, backup/restore, and rollback procedure remain future work.
 
 ## 12. Documentation (README Â§5) â€” [P2]
 
