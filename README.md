@@ -390,6 +390,8 @@ Set in `.env` (never commit real values):
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string |
 | `SESSION_SECRET` | signs sessions/tokens |
+| `APP_ENV` | Set `production` to disable development localhost CORS defaults |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated exact HTTP(S) origins; production should list the HTTPS web origin(s), no wildcard or paths |
 | `ADMIN_BOOTSTRAP_PASSWORD` | initial password for `admin` on hotel 0 (forced change on first login) |
 | `OFFLINE_LOGIN_DAYS` | how long cached desktop credentials stay valid (default 14) |
 | `RATE_LIMIT_LOGIN` | login attempts per window |

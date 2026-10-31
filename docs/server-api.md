@@ -62,6 +62,6 @@ All paths below are prefixed `/api/v1` and require authentication unless a handl
 ## Current limitations
 
 - This inventory is hand-maintained/source-derived; OpenAPI/TypeScript generation is still tracked in `todo.md`.
-- CORS is development-grade (`Any` origin/method/header) and must be restricted before production.
+- CORS uses exact `CORS_ALLOWED_ORIGINS`; set the HTTPS web origin(s) in production. When `APP_ENV=production` and no allowlist is provided, cross-origin browser access is disabled. Same-origin deployments do not require CORS.
 - Authenticated routes are mounted behind `auth_waterfall`; individual handlers apply permission checks and tenant filtering.
 - Do not treat this document as a promise that deferred modules from the reference product are implemented.
