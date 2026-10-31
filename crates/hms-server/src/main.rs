@@ -11,6 +11,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
+use tower_http::set_header::SetResponseHeaderLayer;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
@@ -106,6 +107,26 @@ async fn main() {
             )),
         )
         .layer(cors)
+        .layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::header::X_CONTENT_TYPE_OPTIONS,
+            axum::http::HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::header::X_FRAME_OPTIONS,
+            axum::http::HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::header::REFERRER_POLICY,
+            axum::http::HeaderValue::from_static("no-referrer"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::HeaderName::from_static("permissions-policy"),
+            axum::http::HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::header::CONTENT_SECURITY_POLICY,
+            axum::http::HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+        ))
         // README §13: compress JSON responses (gzip/br) — big win for board/report payloads
         .layer(CompressionLayer::new())
         .with_state(state);
@@ -120,16 +141,23 @@ async fn main() {
 /// cross-origin allowlist. Same-origin requests do not depend on CORS.
 fn cors_allowed_origins() -> Vec<axum::http::HeaderValue> {
     let configured = std::env::var("CORS_ALLOWED_ORIGINS").ok();
-    let values = configured.unwrap_or_else(|| {
-        if std::env::var("APP_ENV")
-            .map(|v| v.eq_ignore_ascii_case("production"))
-            .unwrap_or(false)
-        {
-            String::new()
-        } else {
-            "http://localhost:5173,http://localhost:4173".to_owned()
-        }
-    });
+    let production = std::env::var("APP_ENV")
+        .map(|v| v.eq_ignore_ascii_case("production"))
+        .unwrap_or(false);
+    cors_origins_for(configured.as_deref(), production)
+}
+
+fn cors_origins_for(configured: Option<&str>, production: bool) -> Vec<axum::http::HeaderValue> {
+    let values = configured
+        .filter(|v| !v.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            if production {
+                String::new()
+            } else {
+                "http://localhost:5173,http://localhost:4173".to_owned()
+            }
+        });
     parse_cors_origins(&values)
 }
 
@@ -227,5 +255,14 @@ mod cors_tests {
             "*,https://hms.example.com/app,https://user:pass@hms.example.com,file://localhost,https://hms.example.com?x=1",
         );
         assert!(origins.is_empty());
+    }
+
+    #[test]
+    fn blank_config_uses_localhost_only_outside_production() {
+        assert_eq!(super::cors_origins_for(Some(""), false).len(), 2);
+        assert!(super::cors_origins_for(Some(""), true).is_empty());
+        let explicit = super::cors_origins_for(Some("https://hms.example.com"), true);
+        assert_eq!(explicit.len(), 1);
+        assert_eq!(explicit[0], "https://hms.example.com");
     }
 }
