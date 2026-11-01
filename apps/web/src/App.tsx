@@ -12,6 +12,7 @@ import { Users } from './pages/Users'
 import { Channels } from './pages/Channels'
 import { Reports } from './pages/Reports'
 import { ReportsHub, ReportsForecast, ReportsInhouse, ReportsMainCourante } from './pages/ReportPages'
+import { Admin } from './pages/Admin'
 import { useAuth } from './api/auth'
 
 export default function App() {
@@ -31,6 +32,7 @@ export default function App() {
       <Route path="/change-password" element={<ChangePassword />} />
       <Route element={<AppShell />}>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/admin" element={<Admin />} />
         <Route path="/board" element={<Board />} />
         <Route path="/reservations" element={<Reservations />} />
         <Route path="/guests" element={<Guests />} />

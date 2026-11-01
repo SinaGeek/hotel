@@ -41,11 +41,13 @@ export interface HotelDto {
   time_zone: string
   is_active: boolean
   next_change_seq: number
+  created_at?: string
 }
 
 // ---------------------------------------------------------------- users/roles
 export interface UserDto {
   id: string
+  hotel_id: number
   username: string
   full_name: string | null
   email: string | null

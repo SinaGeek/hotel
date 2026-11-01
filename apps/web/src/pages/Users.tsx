@@ -1,4 +1,4 @@
-// Users (manager) + permission matrix (README §6). Manager can create
+// Users (manager) + permission matrix (README Â§6). Manager can create
 // accounts below manager level; admin sees all roles' matrices.
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -69,7 +69,7 @@ export function Users() {
             <option value="housekeeping">{t('users.housekeeping')}</option>
             <option value="manager" disabled={session?.user.role !== 'admin'}>{t('users.manager')}</option>
           </select>
-          <input placeholder={t('users.password')} type="password" value={password} minLength={8} onChange={(e) => setPassword(e.target.value)} required style={{ width: 140 }} />
+          <input placeholder={t('users.password')} type="password" value={password} minLength={3} onChange={(e) => setPassword(e.target.value)} required style={{ width: 140 }} />
           <button className="primary" type="submit">{t('users.create')}</button>
         </form>
       )}

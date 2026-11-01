@@ -1,0 +1,18 @@
+# Keep the Docker build context small and free of local secrets/artifacts.
+.git
+target
+**/target
+node_modules
+**/node_modules
+apps/web/dist
+apps/desktop/src-tauri/gen
+.env
+.env.*
+!.env.example
+screenshots
+flow_*.js
+inspect_*.py
+postgresql-*.exe
+release
+docs/screenshots
+*.msi

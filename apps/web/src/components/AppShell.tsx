@@ -106,6 +106,7 @@ export function AppShell() {
   ]
   const singles: Single[] = [
     { key: 'dashboard', label: 'nav.dashboard', to: '/', icon: <IconDashboard />, show: true, end: true },
+    { key: 'admin', label: 'Admin Panel', to: '/admin', icon: <IconGear />, show: can('hotel_create') || can('user_manage'), end: false },
     { key: 'board', label: 'nav.board', to: '/board', icon: <IconCalendar />, show: true },
     { key: 'guests', label: 'nav.guests', to: '/guests', icon: <IconUsers />, show: showReservations },
     { key: 'reports', label: 'nav.reports', to: '/reports', icon: <IconChart />, show: can('report_view_tenant') },

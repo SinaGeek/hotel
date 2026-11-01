@@ -1,4 +1,4 @@
-//! Users CRUD (README Â§6: manager can create accounts below manager level)
+//! Users CRUD (README Ã‚Â§6: manager can create accounts below manager level)
 use super::{ApiError, AResult};
 use crate::auth::AuthUser;
 use crate::db;
@@ -19,6 +19,7 @@ pub fn router() -> Router<AppState> {
 #[derive(Serialize, sqlx::FromRow)]
 pub struct UserDto {
     pub id: Uuid,
+    pub hotel_id: i64,
     pub username: String,
     pub full_name: String,
     pub email: Option<String>,
@@ -34,8 +35,24 @@ async fn list(
     if !crate::auth::has_permission(&state.db, &auth.role, auth.hotel_id, hms_core::roles::Permission::UserView).await? {
         return Err(ApiError(StatusCode::FORBIDDEN, "user_view required".into()));
     }
+    // Platform admin sees every hotel (the admin panel needs this); tenant
+    // callers are scoped to their own hotel.
+    if auth.role.contains("admin") {
+        let mut tx = state.db.begin().await.map_err(ApiError::from)?;
+        db::set_platform_scope(&mut tx).await?;
+        let users: Vec<UserDto> = sqlx::query_as(
+            "SELECT id, hotel_id, username, full_name, email, role, is_active, force_password_change
+             FROM users WHERE deleted_at IS NULL ORDER BY hotel_id, username",
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(ApiError::from)?;
+        tx.commit().await.map_err(ApiError::from)?;
+        return Ok(Json(ApiResponse { success: true, data: users, error: None }));
+    }
     let users: Vec<UserDto> = sqlx::query_as(
-        "SELECT id, username, full_name, email, role, is_active, force_password_change FROM users WHERE hotel_id = $1 AND deleted_at IS NULL ORDER BY username",
+        "SELECT id, hotel_id, username, full_name, email, role, is_active, force_password_change
+         FROM users WHERE hotel_id = $1 AND deleted_at IS NULL ORDER BY username",
     )
     .bind(auth.hotel_id)
     .fetch_all(&state.db)
@@ -74,8 +91,11 @@ async fn create(
     if !auth.role.contains("admin") && rank(&body.role) >= rank(&auth.role) {
         return Err(ApiError(StatusCode::FORBIDDEN, "managers can only create accounts below manager level".into()));
     }
-    if body.password.len() < 8 {
-        return Err(ApiError(StatusCode::BAD_REQUEST, "password too short (min 8)".into()));
+    // Initial passwords are forced to change on first login, so a short
+    // hotel-provisioned password (e.g. `1234`) is allowed; real strength comes
+    // from the forced rotation, not from the bootstrap value.
+    if body.password.len() < 3 {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "password too short (min 3)".into()));
     }
     let salt = SaltString::generate(&mut OsRng);
     let hash = Argon2::default().hash_password(body.password.as_bytes(), &salt)
@@ -109,7 +129,7 @@ async fn create(
     db::write_audit(&mut conn, target_hotel, Some(auth.user_id), "user", id, "created", None, Some(serde_json::json!({"username": body.username, "role": body.role}))).await?;
     conn.commit().await.map_err(ApiError::from)?;
 
-    let user: UserDto = sqlx::query_as("SELECT id, username, full_name, email, role, is_active, force_password_change FROM users WHERE id = $1")
+    let user: UserDto = sqlx::query_as("SELECT id, hotel_id, username, full_name, email, role, is_active, force_password_change FROM users WHERE id = $1")
         .bind(id)
         .fetch_one(&state.db)
         .await
@@ -135,12 +155,17 @@ async fn patch(
     if !crate::auth::has_permission(&state.db, &auth.role, auth.hotel_id, hms_core::roles::Permission::UserManage).await? {
         return Err(ApiError(StatusCode::FORBIDDEN, "user_manage required".into()));
     }
-    let old: Option<UserDto> = sqlx::query_as("SELECT id, username, full_name, email, role, is_active, force_password_change FROM users WHERE id = $1")
+    let old: Option<UserDto> = sqlx::query_as("SELECT id, hotel_id, username, full_name, email, role, is_active, force_password_change FROM users WHERE id = $1")
         .bind(id)
         .fetch_optional(&state.db)
         .await
         .map_err(ApiError::from)?;
     let old = old.ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "user not found".into()))?;
+    // Tenant callers may only touch their own hotel; the platform admin can
+    // edit a user in any hotel from the admin panel.
+    if !auth.role.contains("admin") && old.hotel_id != auth.hotel_id {
+        return Err(ApiError(StatusCode::FORBIDDEN, "cannot edit another hotel's user".into()));
+    }
     if let Some(r) = &body.role {
         if !auth.role.contains("admin") && rank(r) >= rank(&auth.role) {
             return Err(ApiError(StatusCode::FORBIDDEN, "cannot assign a role above your own".into()));
@@ -149,8 +174,8 @@ async fn patch(
 
     let mut new_hash: Option<String> = None;
     if let Some(pw) = &body.password {
-        if pw.len() < 8 {
-            return Err(ApiError(StatusCode::BAD_REQUEST, "password too short (min 8)".into()));
+        if pw.len() < 3 {
+            return Err(ApiError(StatusCode::BAD_REQUEST, "password too short (min 3)".into()));
         }
         let salt = SaltString::generate(&mut OsRng);
         new_hash = Some(Argon2::default().hash_password(pw.as_bytes(), &salt)
@@ -159,7 +184,11 @@ async fn patch(
 
     let op_id = Uuid::now_v7();
     let mut conn = state.db.begin().await.map_err(ApiError::from)?;
-    db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
+    if auth.role.contains("admin") {
+        db::set_platform_scope(&mut conn).await?;
+    } else {
+        db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
+    }
     let n = sqlx::query(
         r#"UPDATE users SET
              full_name = COALESCE($2, full_name),
@@ -184,8 +213,8 @@ async fn patch(
     if n == 0 {
         return Err(ApiError(StatusCode::NOT_FOUND, "user not found".into()));
     }
-    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "user", id, "update", serde_json::json!({"patch": body})).await?;
-    db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "user", id, "updated",
+    db::record_change(&mut conn, old.hotel_id, Some(auth.user_id), op_id, "user", id, "update", serde_json::json!({"patch": body})).await?;
+    db::write_audit(&mut conn, old.hotel_id, Some(auth.user_id), "user", id, "updated",
         Some(serde_json::to_value(&old).unwrap_or_default()),
         Some(serde_json::to_value(&body).unwrap_or_default())).await?;
     conn.commit().await.map_err(ApiError::from)?;

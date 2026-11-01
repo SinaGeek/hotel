@@ -16,10 +16,16 @@ apps/web/dist/
 !.env.example
 userpass.md
 
-# Captured reference-site artifacts (may contain data, keep out of history)
+# Captured reference-site artifacts / reverse-engineering scratch (never ship)
 *.min.js.bak
 *.http
+flow_*.js
+inspect_*.py
 /screenshots/
+
+# Local installers and build deliverables (regenerate, do not commit)
+/postgresql-*.exe
+/release/
 
 # Editor / OS
 .vscode/*

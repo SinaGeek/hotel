@@ -2,7 +2,7 @@
 
 Completed: 27 Oct 2026. Verified live with a logged-in session (Sina E., Kuzen Otel, facility code 4442 — see `.env.example` for the credential variables; credentials are only in the user's possession, not in this repo). Login succeeded with **no captcha**; the OpenCode embedded browser keeps the session, so future sessions may still be logged in — check before asking the user for credentials.
 
-Evidence screenshots live in `docs/screenshots/`.
+Evidence screenshots were captured during the live audit and are intentionally not committed (reverse-engineering artifacts, removed from the final product).
 
 ## Menu / route tree (site 2, v2.08)
 

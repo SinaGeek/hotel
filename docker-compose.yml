@@ -1,6 +1,9 @@
-# Development environment: PostgreSQL + the HMS server.
-# Usage: docker compose up -d
-# The server itself runs with `cargo run -p hms-server` (it applies migrations on start).
+# PostgreSQL + the HMS server (README §17). Usage:
+#   cp .env.example .env      # fill in SESSION_SECRET, ADMIN_BOOTSTRAP_PASSWORD, ...
+#   docker compose up -d --build
+#
+# The server applies PostgreSQL migrations on start. Put a TLS-terminating
+# reverse proxy in front of it (see deploy/Caddyfile or deploy/nginx.conf).
 
 services:
   db:
@@ -20,19 +23,29 @@ services:
       timeout: 3s
       retries: 10
 
-  # server: defined when the server image exists (see crates/hms-server/Dockerfile).
-  # cargo run -p hms-server against the db service is the development workflow for now.
-  #server:
-  #  build:
-  #    context: .
-  #    dockerfile: crates/hms-server/Dockerfile
-  #  ports:
-  #    - "8080:8080"
-  #  environment:
-  #    DATABASE_URL: postgres://postgres:postgres@db:5432/hms
-  #  depends_on:
-  #    db:
-  #      condition: service_healthy
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hms-server
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-hms}
+      APP_ENV: ${APP_ENV:-production}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:?ADMIN_BOOTSTRAP_PASSWORD must be set}
+      GUEST_FIELD_ENCRYPTION_KEY: ${GUEST_FIELD_ENCRYPTION_KEY:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      RATE_LIMIT_LOGIN: ${RATE_LIMIT_LOGIN:-10}
+      OFFLINE_LOGIN_DAYS: ${OFFLINE_LOGIN_DAYS:-14}
+      SYNC_PROTOCOL_MIN_VERSION: ${SYNC_PROTOCOL_MIN_VERSION:-1}
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      DB_POOL_MIN: ${DB_POOL_MIN:-10}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   hms-db-data:

@@ -28,7 +28,12 @@ import type {
   UserDto,
 } from '../types/generated/api'
 
-const BASE = '/api/v1'
+// API base. The browser build talks to its own origin (`/api/v1`, proxied to the
+// Rust server by Vite in dev/preview and by nginx/Caddy in production). The
+// packaged desktop app is served from `http://tauri.localhost`, so it must build
+// with an absolute base: `VITE_API_BASE=http://<server>:8080/api/v1`. The value is
+// baked in at build time; leave unset for the web build.
+const BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/+$/, '') || '/api/v1'
 const AUTH_KEY = 'hms.session'
 
 export interface Session {
@@ -102,11 +107,25 @@ export const api = {
 
   // ---------------------------------------------------------------- hotels
   listHotels: () => request<HotelDto[]>('/hotels'),
+  createHotel: (b: { id: number; name: string; default_currency?: string; time_zone?: string }) =>
+    request<HotelDto>('/hotels', { method: 'POST', body: b }),
+  updateHotel: (id: string | number, b: { name?: string; is_active?: boolean }) =>
+    request<HotelDto>(`/hotels/${id}`, { method: 'PATCH', body: b }),
 
   // ---------------------------------------------------------------- users/roles
   listUsers: () => request<UserDto[]>('/users'),
-  createUser: (b: { hotel_id?: number; username: string; full_name?: string; role: string; password: string }) =>
-    request<UserDto>('/users', { method: 'POST', body: b }),
+  createUser: (b: {
+    hotel_id?: number
+    username: string
+    full_name?: string
+    email?: string
+    role: string
+    password: string
+  }) => request<UserDto>('/users', { method: 'POST', body: b }),
+  updateUser: (
+    id: string,
+    b: { full_name?: string; email?: string; role?: string; is_active?: boolean; password?: string },
+  ) => request<UserDto>(`/users/${id}`, { method: 'PATCH', body: b }),
   roleMatrix: (role: string) => request<RoleMatrix>(`/roles/${role}/permissions`),
 
   // ---------------------------------------------------------------- rooms

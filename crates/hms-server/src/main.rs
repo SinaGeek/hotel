@@ -2,6 +2,7 @@ mod api;
 mod auth;
 mod bootstrap;
 mod db;
+mod metrics;
 mod rate_limiter;
 
 use axum::{routing::get, Json, Router};
@@ -101,6 +102,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health_check))
+        .route("/metrics", get(metrics::endpoint))
         .nest("/api/v1/auth", auth::router())
         .nest(
             "/api/v1",
@@ -109,6 +111,7 @@ async fn main() {
                 auth_waterfall,
             )),
         )
+        .layer(axum::middleware::from_fn(metrics::track))
         .layer(cors)
         .layer(security_headers())
         // README §13: compress JSON responses (gzip/br) — big win for board/report payloads

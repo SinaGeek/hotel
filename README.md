@@ -7,7 +7,7 @@ It merges two existing products into one:
 - **app.hmsflow.com**: the visual reference for the UI (layout, navigation, colors, component style). The UI is original code.
 - **app.hms.gen.tr** (HMS Hotel Software): every feature it offers must exist in this system.
 
-> **Status (2026-10-31):** the core Rust/Axum server, Postgres migrations, React/Vite web app, reporting endpoints, versioned sync engine, Tauri desktop shell, SQLite mirror, and Windows MSI packaging are implemented. `docs/server-api.md` is the source-derived route snapshot; `docs/feature-inventory.md` is the site-2 inventory. Remaining limitations include SQLCipher (desktop uses bundled SQLite + DPAPI-protected secrets), full local-first write support/offline report parity, OpenAPI/TS type generation, production CORS/TLS/deployment hardening, and the Tauri auto-updater (signing/manifest setup pending). See `todo.md` for the current checklist.
+> **Status (2026-11-01):** the Rust/Axum server, Postgres migrations, React/Vite web app, reporting endpoints, versioned sync engine, Tauri desktop shell, SQLite mirror, Windows MSI packaging and the platform **admin panel** (`/admin`: hotels + users) are implemented. `docs/server-api.md` is the source-derived route snapshot; `docs/feature-inventory.md` is the site-2 inventory. Deployment assets (Dockerfile, compose server service, Caddy/nginx samples, Prometheus `/metrics`, backup script) and the guest-key rotation tool are in place. Remaining blockers and their step-by-step plans live in **`final_product_remains.md`** (SQLCipher, Tauri auto-updater, production stack verification, desktop E2E, OpenAPI/TS codegen).
 
 ---
 
@@ -371,14 +371,18 @@ pnpm dev
 psql "$DATABASE_URL" -f ../../seed/loadtest.sql
 
 # 6. Windows desktop app (install the Tauri CLI; from the Tauri crate directory)
-cd apps/desktop/src-tauri
+cd apps/web
+VITE_API_BASE=http://localhost:8080/api/v1 pnpm build   # desktop is served from tauri.localhost, so it needs an absolute API base
+cd ../desktop/src-tauri
 cargo tauri dev
 cargo tauri build               # emits the MSI bundle; auto-update is not configured
 ```
 
 First login: hotel ID `0`, username `admin`, and the bootstrap password from `.env`; a forced password change is required. The `seed/loadtest.sql` script creates the separate load-test hotel 4443; it is not a general-purpose 1,000-hotel seed generator.
 
-The server and web workflow is verified. Desktop MSI packaging is implemented; release signing and auto-update feed/manifest are not configured. Production deployment still requires CORS/TLS/security-header hardening and operational controls listed in sections 17 and `todo.md`.
+Hotel-provisioned initial passwords may be short (the admin panel creates `manager` / `1234` so a hotel can be handed over immediately). Every account is forced to change its password on first login, and login attempts are rate-limited; still choose strong passwords for production accounts. The platform admin can create hotels and users from the **Admin Panel** at `/admin`.
+
+The server and web workflow is verified. Desktop MSI packaging is implemented; release signing and auto-update feed/manifest are not configured. Production deployment still requires CORS/TLS/security-header hardening and operational controls listed in sections 17 and `final_product_remains.md`.
 
 ---
 
@@ -398,6 +402,9 @@ Set in `.env` (never commit real values):
 | `RATE_LIMIT_LOGIN` | login attempts per window |
 | `SYNC_PROTOCOL_MIN_VERSION` | oldest desktop sync protocol still accepted |
 | `SITE1_*`, `SITE2_*` | reference-site credentials, only for the feature inventory (hotel ID, user, password) |
+| `TEST_USERS` | Comma-separated test users (dev/test only): `hotel_id:username:password:role,...` (e.g., `4442:sina:123:manager`) |
+| `VITE_API_BASE` | Web build-time API base. Leave unset for the browser build (relative `/api/v1`); set `http://<server>:8080/api/v1` when building the web bundle that ships inside the desktop app |
+| `HMS_API_BASE`, `SYNC_INTERVAL_SECS` | Desktop runtime: server base URL used by the background sync worker (default `http://localhost:8080`) and seconds between sync cycles (default 30) |
 
 ---
 

@@ -2,6 +2,15 @@
 name = "hms-server"
 version = "0.1.0"
 edition = "2021"
+default-run = "hms-server"
+
+[[bin]]
+name = "hms-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "rotate-guest-keys"
+path = "src/bin/rotate_guest_keys.rs"
 
 [dependencies]
 hms-core = { path = "../hms-core" }
@@ -19,6 +28,5 @@ tower-http = { version = "0.6", features = ["cors", "trace", "compression-full",
 url = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-thiserror = "2.0"
 dotenvy = "0.15"
 rand = "0.8"

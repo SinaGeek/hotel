@@ -60,11 +60,11 @@ All paths below are prefixed `/api/v1` and require authentication unless a handl
 - The protocol is versioned. The current client/server protocol constant and request/response serde types are in `crates/hms-core/src/sync.rs` (and related sync modules); keep those as the authoritative wire source.
 - Pushes are idempotent by operation ID. Replays of applied operations return duplicate-ignored semantics; conflicts are preserved and represented as reservation status `conflict`, rather than dropped.
 - Pull uses a monotonically increasing per-hotel change counter, not a timestamp. The client advances its cursor only as pulled changes are applied/deduplicated.
-- The desktop stores its one-hotel mirror in SQLite, protects the auth token/offline verifier with Windows DPAPI, queues operations in `outbox`, and runs periodic sync. Current desktop UI writes are not yet fully local-first; see `todo.md` item 201.
+- The desktop stores its one-hotel mirror in SQLite, protects the auth token/offline verifier with Windows DPAPI, queues operations in `outbox`, and runs periodic sync. Current desktop UI writes are not yet fully local-first; see `final_product_remains.md` §3.4.
 
 ## Current limitations
 
-- This inventory is hand-maintained/source-derived; OpenAPI/TypeScript generation is still tracked in `todo.md`.
+- This inventory is hand-maintained/source-derived; OpenAPI/TypeScript generation is still tracked in `final_product_remains.md` (§3.5).
 - CORS uses exact `CORS_ALLOWED_ORIGINS`; set the HTTPS web origin(s) in production. When `APP_ENV=production` and no allowlist is provided, cross-origin browser access is disabled. Same-origin deployments do not require CORS.
 - Authenticated routes are mounted behind `auth_waterfall`; individual handlers apply permission checks and tenant filtering.
 - Do not treat this document as a promise that deferred modules from the reference product are implemented.

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-pub const SESSION_DAYS: i64 = 2; // short-lived sessions (README §8)
+pub const SESSION_DAYS: i64 = 2; // short-lived sessions (README Â§8)
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -121,7 +121,7 @@ struct LoginBody {
     hotel_id: i64,
     username: String,
     password: String,
-    /// Set by the desktop webview (README §11.7): the response then carries
+    /// Set by the desktop webview (README Â§11.7): the response then carries
     /// `offline_verifier` so the native shell can cache credentials for
     /// offline verification. Plain browsers never receive the hash.
     #[serde(default)]
@@ -156,7 +156,7 @@ async fn login(
     headers: HeaderMap,
     Json(body): Json<LoginBody>,
 ) -> Result<Json<ApiResponse<LoginResponse>>, (StatusCode, Json<ApiResponse<()>>)> {
-    // Rate limiting per hotel:username (and IP) — README §8
+    // Rate limiting per hotel:username (and IP) â€” README Â§8
     let ip = headers.get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("local")
@@ -289,8 +289,11 @@ async fn change_password(
     auth: AuthUser,
     Json(body): Json<ChangePasswordBody>,
 ) -> Result<Json<ApiResponse<()>>, (StatusCode, Json<ApiResponse<()>>)> {
-    if body.new_password.len() < 8 {
-        return Err(err(StatusCode::BAD_REQUEST, "password too short (min 8)"));
+    // Hotels provision short initial passwords (e.g. `1234`); the forced
+    // change flow lets each user choose their own. Keep the same minimum as
+    // user creation so provisioning remains consistent.
+    if body.new_password.len() < 3 {
+        return Err(err(StatusCode::BAD_REQUEST, "password too short (min 3)"));
     }
     let row: Option<String> = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
         .bind(auth.user_id)

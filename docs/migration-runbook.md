@@ -23,4 +23,4 @@ This document records how schema changes are applied today. It is a development/
 - Implement SQLite migration versioning before the next incompatible mirror schema change.
 - Add and rehearse PostgreSQL backup/restore and replication procedures.
 - Define a production release order and tested rollback strategy for server migrations and desktop updates.
-- SQLCipher and Tauri auto-updater remain separately tracked blockers in `todo.md`.
+- SQLCipher and Tauri auto-updater remain separately tracked blockers in `final_product_remains.md`.
