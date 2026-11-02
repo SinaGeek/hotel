@@ -478,7 +478,13 @@ async fn apply_guest(
                     serde_json::json!({"note": "tombstoned guest stays deleted"})).await?;
                 return Ok(SyncOpStatus::DuplicateIgnored);
             }
-            persist(conn, auth, op, &SyncOpStatus::Applied, serde_json::json!({"full_name": full_name})).await?;
+            persist(conn, auth, op, &SyncOpStatus::Applied,
+                serde_json::json!({
+                    "full_name": full_name,
+                    "nationality": p_opt_str(&op.payload, "nationality")?,
+                    "license_plate": p_opt_str(&op.payload, "license_plate")?,
+                    "birth_date": p_opt_str(&op.payload, "birth_date")?
+                })).await?;
             Ok(SyncOpStatus::Applied)
         }
     }
@@ -574,9 +580,10 @@ async fn insert_reservation(
                     .map_err(|e| format!("conflict insert: {e}"))?;
                 super::reservations::seed_revenue_rows(&mut *conn, auth.hotel_id, room_id, channel_id, op.entity_id).await;
                 let reason = "overlapping stay -> status conflict (reassign in UI)".to_owned();
+                let echo = super::reservations::reservation_echo(conn, auth.hotel_id, op.entity_id).await?;
                 persist(conn, auth, op,
                     &SyncOpStatus::ConflictResolved { message: reason.clone() },
-                    serde_json::json!({"checkin_date": checkin, "checkout_date": checkout})).await?;
+                    echo).await?;
                 SyncOpStatus::ConflictResolved { message: reason }
             }
             Err(e) if is_fk_violation(&e) => return Err("references an unknown room/channel/guest for this hotel".into()),
@@ -595,8 +602,8 @@ async fn insert_reservation(
                 })
                 .await
                 .map_err(|e| e.1.to_string())?;
-                persist(conn, auth, op, &SyncOpStatus::Applied,
-                    serde_json::json!({"checkin_date": checkin, "checkout_date": checkout})).await?;
+                let echo = super::reservations::reservation_echo(conn, auth.hotel_id, op.entity_id).await?;
+                persist(conn, auth, op, &SyncOpStatus::Applied, echo).await?;
                 SyncOpStatus::Applied
             }
         }
@@ -766,7 +773,8 @@ async fn update_reservation(
     })
     .await
     .map_err(|e| e.1.to_string())?;
-    persist(conn, auth, op, &final_status, serde_json::json!({"status": status})).await?;
+    let echo = super::reservations::reservation_echo(conn, auth.hotel_id, op.entity_id).await?;
+    persist(conn, auth, op, &final_status, echo).await?;
     Ok(final_status)
 }
 
@@ -864,7 +872,13 @@ async fn apply_payment(
     .map_err(|e| format!("daily_revenue payment: {e}"))?;
 
     persist(conn, auth, op, &SyncOpStatus::Applied,
-        serde_json::json!({"amount_cents": amount, "payment_type": payment_type})).await?;
+        serde_json::json!({
+            "reservation_id": reservation_id.to_string(),
+            "amount_cents": amount,
+            "currency": currency,
+            "payment_type": payment_type,
+            "reference": reference
+        })).await?;
     Ok(SyncOpStatus::Applied)
 }
 
@@ -936,7 +950,16 @@ async fn apply_folio(
     .map_err(|e| format!("daily_revenue extra: {e}"))?;
     super::reservations::seed_revenue_rows(&mut *conn, auth.hotel_id, res.0, res.1, reservation_id).await;
 
-    persist(conn, auth, op, &SyncOpStatus::Applied, serde_json::json!({"category": category})).await?;
+    persist(conn, auth, op, &SyncOpStatus::Applied,
+        serde_json::json!({
+            "reservation_id": reservation_id.to_string(),
+            "category": category,
+            "description": description,
+            "unit_price_cents": unit,
+            "quantity": qty,
+            "total_cents": total,
+            "currency": currency
+        })).await?;
     Ok(SyncOpStatus::Applied)
 }
 

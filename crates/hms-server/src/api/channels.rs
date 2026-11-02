@@ -62,7 +62,7 @@ async fn list(State(state): State<AppState>, auth: AuthUser) -> AResult<Json<Api
                 .execute(&mut *conn)
                 .await
                 .map_err(ApiError::from)?;
-            db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "channel", id, "insert", serde_json::json!({"channel": name})).await?;
+            db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "channel", id, "insert", serde_json::json!({"kind": kind, "name": name, "is_active": true})).await?;
         }
         conn.commit().await.map_err(ApiError::from)?;
         let rows: Vec<ChannelDto> = sqlx::query_as(

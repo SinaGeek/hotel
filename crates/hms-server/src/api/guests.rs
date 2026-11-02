@@ -62,7 +62,13 @@ async fn update(
     if result.rows_affected() == 0 {
         return Err(ApiError(StatusCode::NOT_FOUND, "guest not found".into()));
     }
-    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "guest", id, "update", serde_json::json!({})).await?;
+    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "guest", id, "update",
+        serde_json::json!({
+            "full_name": body.full_name,
+            "nationality": body.nationality,
+            "license_plate": body.license_plate,
+            "birth_date": body.birth_date
+        })).await?;
     db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "guest", id, "updated", None, Some(serde_json::json!({}))).await?;
     conn.commit().await.map_err(ApiError::from)?;
     Ok(Json(ApiResponse { success: true, data: (), error: None }))
@@ -180,7 +186,13 @@ async fn create(
     .execute(&mut *conn)
     .await
     .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("cannot create guest: {e}")))?;
-    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "guest", id, "insert", serde_json::json!({"full_name": body.full_name})).await?;
+    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "guest", id, "insert",
+        serde_json::json!({
+            "full_name": body.full_name,
+            "nationality": body.nationality,
+            "license_plate": body.license_plate,
+            "birth_date": body.birth_date
+        })).await?;
     db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "guest", id, "created", None, Some(serde_json::json!({"full_name": body.full_name}))).await?;
     conn.commit().await.map_err(ApiError::from)?;
 

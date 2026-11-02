@@ -67,6 +67,67 @@ pub struct ListQuery {
 
 // ------------------------------------------------------------------------- helpers
 
+/// Canonical, mirror-shape echo for one reservation's change record (todo A2
+/// "server decides"): the payload the desktop `apply_remote` consumes to
+/// rebuild the local row exactly as the server has it — room/channel/guest
+/// ids, dates, status, total. Never a client-provided body or a hand-picked
+/// subset, so every device (including the one that pushed the op) converges.
+pub(crate) async fn reservation_echo(
+    conn: &mut sqlx::PgConnection,
+    hotel_id: i64,
+    id: Uuid,
+) -> Result<serde_json::Value, String> {
+    let row: (Uuid, Uuid, Option<Uuid>, chrono::NaiveDate, chrono::NaiveDate, String, i64, i16, i16) =
+        sqlx::query_as(
+            "SELECT room_id, channel_id, guest_id, checkin_date, checkout_date,
+                    status, total_price_cents, adults, children
+             FROM reservations WHERE id = $1 AND hotel_id = $2",
+        )
+        .bind(id)
+        .bind(hotel_id)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|e| format!("reservation echo: {e}"))?;
+    Ok(serde_json::json!({
+        "room_id": row.0.to_string(),
+        "channel_id": row.1.to_string(),
+        "guest_id": row.2.map(|g| g.to_string()),
+        "checkin_date": row.3.to_string(),
+        "checkout_date": row.4.to_string(),
+        "status": row.5,
+        "total_price_cents": row.6,
+        "adults": row.7,
+        "children": row.8,
+    }))
+}
+
+/// Canonical mirror-shape echo for one payment (append-only rows include
+/// everything the desktop mirror needs; reversals stay negative amounts).
+pub(crate) async fn payment_echo(
+    conn: &mut sqlx::PgConnection,
+    hotel_id: i64,
+    payment_id: Uuid,
+) -> Result<serde_json::Value, String> {
+    let row: (Uuid, i64, String, String, Option<String>, bool) = sqlx::query_as(
+        "SELECT reservation_id, amount_cents, currency, payment_type, reference, is_reversal
+         FROM payments WHERE id = $1 AND hotel_id = $2",
+    )
+    .bind(payment_id)
+    .bind(hotel_id)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(|e| format!("payment echo: {e}"))?;
+    Ok(serde_json::json!({
+        "reservation_id": row.0.to_string(),
+        "amount_cents": row.1,
+        "currency": row.2,
+        "payment_type": row.3,
+        "reference": row.4,
+        "is_reversal": row.5,
+    }))
+}
+
+
 /// Compute effective daily price for a room type on a date: latest matching
 /// price rule (overlaps rule range), else room type base price.
 async fn price_for_date(
@@ -379,8 +440,10 @@ pub async fn create(
         status: "confirmed".into(),
         daily_rates: serde_json::to_value(&rates).unwrap_or_default(),
     }).await?;
+    let echo = reservation_echo(&mut conn, auth.hotel_id, id).await
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "reservation", id, "insert",
-        serde_json::json!({"reservation": id})).await?;
+        echo).await?;
     conn.commit().await.map_err(ApiError::from)?;
 
     let row: ReservationDto = sqlx::query_as(
@@ -476,7 +539,9 @@ pub async fn edit(
         hotel_id: auth.hotel_id, room_id, channel_id, checkin_date: checkin, checkout_date: checkout,
         status: existing.status.clone(), daily_rates: serde_json::to_value(&rates).unwrap_or_default(),
     }).await?;
-    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "reservation", id, "update", serde_json::json!(&body)).await?;
+    let echo = reservation_echo(&mut conn, auth.hotel_id, id).await
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "reservation", id, "update", echo).await?;
     conn.commit().await.map_err(ApiError::from)?;
 
     let row: ReservationDto = sqlx::query_as(
@@ -527,8 +592,10 @@ pub async fn status_change(
             status: new_status.to_string(), daily_rates: existing.daily_rates.clone(),
         }).await?;
     }
+    let echo = reservation_echo(&mut conn, auth.hotel_id, id).await
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "reservation", id, "update",
-        serde_json::json!({"status": new_status})).await?;
+        echo).await?;
     conn.commit().await.map_err(ApiError::from)?;
     let row: ReservationDto = sqlx::query_as(
         "SELECT id, hotel_id, room_id, channel_id, guest_id, checkin_date, checkout_date, status, daily_rates, total_price_cents, currency, adults, children, notes, voucher_number, created_at FROM reservations WHERE id = $1",
@@ -847,8 +914,10 @@ async fn record_payment(
     .await
     .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("daily_revenue payment: {e}")))?;
 
+    let pay_echo = payment_echo(&mut conn, auth.hotel_id, pid).await
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "payment", pid, "insert",
-        serde_json::json!({"amount_cents": body.amount_cents, "payment_type": body.payment_type})).await?;
+        pay_echo).await?;
     db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "payment", pid, "created", None,
         serde_json::to_value(&body).ok()).await?;
     conn.commit().await.map_err(ApiError::from)?;
@@ -913,8 +982,10 @@ async fn reverse_payment(
     .await
     .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("daily_revenue reversal: {e}")))?;
 
+    let pay_echo = payment_echo(&mut conn, auth.hotel_id, rid).await
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     db::record_change(&mut conn, auth.hotel_id, Some(auth.user_id), op_id, "payment", rid, "insert",
-        serde_json::json!({"reversal_of": id})).await?;
+        pay_echo).await?;
     db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "payment", rid, "reversed", None,
         Some(serde_json::json!({"reversal_of": id}))).await?;
     conn.commit().await.map_err(ApiError::from)?;

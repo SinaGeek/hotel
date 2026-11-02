@@ -448,8 +448,7 @@ impl SyncStore for LocalStore {
                            room_id = excluded.room_id, channel_id = excluded.channel_id,
                            guest_id = excluded.guest_id, checkin_date = excluded.checkin_date,
                            checkout_date = excluded.checkout_date,
-                           status = CASE WHEN reservations.status = 'conflict' AND NOT ?11
-                                         THEN reservations.status ELSE excluded.status END,
+                           status = excluded.status,
                            total_price_cents = excluded.total_price_cents,
                            adults = excluded.adults, children = excluded.children, deleted_at = NULL",
                         params![
@@ -463,7 +462,6 @@ impl SyncStore for LocalStore {
                             payload["total_price_cents"].as_i64().unwrap_or(0),
                             payload["adults"].as_i64().unwrap_or(1).max(0),
                             payload["children"].as_i64().unwrap_or(0).max(0),
-                            conflict,
                         ],
                     )
                     .map_err(se)?;
