@@ -1,0 +1,98 @@
+# Release workflow (todo D6): build the web bundle + signed MSI, then publish
+# the installer and the updater manifest (`latest.json`) to the update host.
+#
+# Required repository secrets:
+#   TAURI_SIGNING_PRIVATE_KEY           contents of hms.key (minisign private key)
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  the password that key was generated with
+# Optional:
+#   UPDATE_PUBLISH_CMD   shell command that uploads $ARTIFACTS/* to the update
+#                        host (e.g. `aws s3 cp`, `rclone copy`, `gh release upload`).
+#                        When unset the workflow only produces the artifacts.
+#
+# The server's `426` force-update path (see crates/hms-core/src/sync.rs
+# SYNC_PROTOCOL_MIN_VERSION) makes a released manifest mandatory for older
+# builds, so always publish `latest.json` together with the MSI.
+name: Release desktop
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+
+      # Webview assets are embedded into the desktop binary
+      - name: Build web bundle
+        working-directory: apps/web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      # SQLCipher builds OpenSSL from source; the runner already has MSVC,
+      # Perl and NASM, so only the key material needs to be provided.
+      - name: Build + sign MSI
+        working-directory: apps/web
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm exec tauri build
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          $bundle = "apps/desktop/src-tauri/target/release/bundle"
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          # MSI installer + its minisign signature
+          Copy-Item "$bundle/msi/*.msi" artifacts/ -ErrorAction Stop
+          Copy-Item "$bundle/msi/*.msi.sig" artifacts/ -ErrorAction Stop
+          $msi = Get-ChildItem artifacts -Filter *.msi | Select-Object -First 1
+          $sig = Get-Content "$($msi.FullName).sig" -Raw
+          $version = (Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $base = if ($env:UPDATE_BASE_URL) { $env:UPDATE_BASE_URL } else { "https://updates.hms.example/api/v1/desktop" }
+          $manifest = [ordered]@{
+            version  = $version
+            notes    = "HMS Desktop $version"
+            pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $sig.Trim()
+                url       = "$base/$($msi.Name)"
+              }
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content artifacts/latest.json -Encoding utf8
+          Get-ChildItem artifacts | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hms-desktop-msi
+          path: artifacts/*
+
+      - name: Publish to update host
+        if: ${{ env.UPDATE_PUBLISH_CMD != '' }}
+        shell: pwsh
+        env:
+          UPDATE_PUBLISH_CMD: ${{ vars.UPDATE_PUBLISH_CMD }}
+          ARTIFACTS: ${{ github.workspace }}/artifacts
+        run: |
+          Write-Host "Publishing: $env:UPDATE_PUBLISH_CMD"
+          Invoke-Expression $env:UPDATE_PUBLISH_CMD
+          if ($LASTEXITCODE -ne 0) { throw "publish command failed with exit $LASTEXITCODE" }

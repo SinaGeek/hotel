@@ -5,11 +5,21 @@
 // serves both the REST web app and the offline desktop shell.
 
 export interface SyncSnapshot {
-  state: 'Synced' | 'Failing' | 'Locked' | 'Unknown'
+  state: 'Synced' | 'Failing' | 'Locked' | 'Unknown' | 'UpdateRequired'
   /** present for Synced { synced_at_ms, pending, conflicts } and Failing { reason, pending } */
   detail?:
     | { synced_at_ms: number; pending: number; conflicts: number }
     | { reason: string; pending: number }
+}
+
+/** D3/D4: what `update_check` reports; `mandatory` blocks syncing. */
+export interface UpdateInfo {
+  available: boolean
+  current_version: string
+  version: string | null
+  notes: string | null
+  mandatory: boolean
+  raw_json?: unknown
 }
 
 /** True only inside the Tauri webview (injected internals). */
@@ -105,6 +115,15 @@ export const desktop = {
    * offline; the mirror must already hold the payment (pulled by sync). */
   paymentLookup: (paymentId: string) =>
     invoke<PaymentMirror>('local_payment_lookup', { paymentId }),
+
+  // ------------------------------------------------------------- updater
+  /** Ask the update endpoint whether a newer build exists (no download). */
+  updateCheck: () => invoke<UpdateInfo>('update_check'),
+  /** Download, verify and install the pending release. A final sync runs
+   * first; its failure aborts the install so no write is stranded. */
+  updateInstall: () => invoke<string>('update_install'),
+  /** True while the server refuses this build (426) — syncing is blocked. */
+  updateRequired: () => invoke<boolean>('update_required'),
 }
 
 export interface WriteOutcome {

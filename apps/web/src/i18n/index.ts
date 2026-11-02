@@ -54,6 +54,16 @@ const en = {
     lightMode: 'Light mode',
     newRecord: 'New record',
   },
+  update: {
+    available: 'Update {{version}} available',
+    mandatory: 'Update {{version}} required',
+    install: 'Install',
+    installing: 'Installing…',
+    installed: 'Installed — restart to finish',
+    blockedTitle: 'Update required before syncing',
+    blockedMsg:
+      'The server no longer accepts this app version ({{reason}}). Install the update to resume syncing; your local data and any queued changes are preserved.',
+  },
   sync: {
     synced: 'Synced {{when}}',
     syncedPending: 'Synced; {{pending}} operation(s) waiting',

@@ -74,6 +74,15 @@ export function SyncStatusPill() {
       title = d.reason ? t('sync.offlineReason', { reason: d.reason }) : t('sync.offlineTitle')
       break
     }
+    case 'UpdateRequired': {
+      // D4: the server refused this build (426). Syncing is blocked until the
+      // install completes; the UpdatePill carries the action button.
+      const d = status.detail as { reason?: string }
+      dot = '#ef4444'
+      text = t('update.blockedTitle')
+      title = t('update.blockedMsg', { reason: d.reason ?? '426' })
+      break
+    }
     default:
       text = t('sync.unknown')
       title = t('sync.unknownTitle')

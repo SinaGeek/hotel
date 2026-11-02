@@ -15,6 +15,7 @@ mod local_store;
 mod sqlcipher;
 mod offline;
 mod reports;
+mod updater;
 
 use hms_sync::engine::{SyncEngine, SyncFailure, SyncOutcome};
 use hms_sync::store::{StoreError, SyncStore};
@@ -23,7 +24,9 @@ use local_store::LocalStore;
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tauri::Manager;
 use tokio::sync::{watch, RwLock};
+use updater::UpdateState;
 
 struct AppState {
     api_base: String,
@@ -31,6 +34,7 @@ struct AppState {
     synced_rx: watch::Receiver<SyncState>,
     sync_sender: Arc<watch::Sender<SyncState>>,
     db_path: PathBuf,
+    updates: Arc<UpdateState>,
 }
 
 /// What the sidebar status pill shows (README §11.8).
@@ -47,6 +51,9 @@ enum SyncState {
     Failing { reason: String, pending: usize },
     /// 401/403 at sync: wiped offline cache, force online re-login
     Locked,
+    /// D4: the server rejected this build's sync protocol (426); an update
+    /// must be installed before syncing again
+    UpdateRequired { reason: String },
     /// no successful cycle yet
     Unknown,
 }
@@ -169,6 +176,10 @@ async fn sync_now(state: tauri::State<'_, AppState>) -> Result<serde_json::Value
     let msg = match &outcome {
         Ok(_) => summarize(&state.db_path, None).map_err(|e| e.to_string())?,
         Err(SyncFailure::AccountLocked(_)) => SyncState::Locked,
+        Err(SyncFailure::UpdateRequired(reason)) => {
+            state.updates.force();
+            SyncState::UpdateRequired { reason: reason.clone() }
+        }
         Err(e) => summarize(&state.db_path, Some(e.to_string())).map_err(|x| x.to_string())?,
     };
     let _ = state.synced_tx().send(msg);
@@ -224,6 +235,13 @@ async fn local_write(
                 let _ = state.synced_tx().send(SyncState::Locked);
                 cycle_error = Some("account locked; sign in online".into());
             }
+            Err(SyncFailure::UpdateRequired(reason)) => {
+                // D4: this build is too old for the server's sync protocol
+                state.updates.force();
+                let reason = reason.clone();
+                let _ = state.synced_tx().send(SyncState::UpdateRequired { reason: reason.clone() });
+                cycle_error = Some(format!("update required: {reason}"));
+            }
             Err(err) => cycle_error = Some(err.to_string()),
         }
         if !local_first::op_is_still_pending(&mut store, oid)? {
@@ -270,6 +288,38 @@ async fn local_payment_lookup(
             "payment not found on this device; connect and sync online first".into(),
         ),
     }
+}
+
+/// Updater (D3): check the configured endpoint now; the worker also polls.
+#[tauri::command]
+async fn update_check(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<updater::UpdateInfo, String> {
+    updater::check(&app, &state.updates).await
+}
+
+/// Updater (D3/D5): download, verify and install the pending release. A final
+/// sync runs first so the outbox is drained while the old build is alive.
+#[tauri::command]
+async fn update_install(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let version = updater::download_and_install(&app, &state.updates, || async {
+        run_cycle(state.api_base.clone(), state.token.clone(), state.db_path.clone())
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("sync before update failed ({e}); not installing"))
+    })
+    .await?;
+    Ok(version)
+}
+
+/// Updater (D4): true while the server refuses this build's sync protocol.
+#[tauri::command]
+fn update_required(state: tauri::State<'_, AppState>) -> bool {
+    state.updates.is_forced()
 }
 
 /// SyncOutcome is a report for the status pill, serialized by hand (the
@@ -369,6 +419,7 @@ async fn main() {
         synced_rx: sync_rx,
         sync_sender: Arc::new(sync_tx),
         db_path: db_path.clone(),
+        updates: Arc::new(UpdateState::default()),
     };
 
     // background worker (todo A5 automatic sync triggers): one engine cycle
@@ -383,6 +434,7 @@ async fn main() {
         let tok = state.token.clone();
         let base = api_base.clone();
         let db = db_path.clone();
+        let updates = state.updates.clone();
         tokio::spawn(async move {
             // 0 delay = attempt right away (app-start trigger)
             let mut delay_secs: u64 = 0;
@@ -407,6 +459,12 @@ async fn main() {
                         }
                         let _ = tx.send(SyncState::Locked);
                     }
+                    Err(SyncFailure::UpdateRequired(reason)) => {
+                        // D4: stop hammering the server; the build must update
+                        updates.force();
+                        delay_secs = interval.as_secs();
+                        let _ = tx.send(SyncState::UpdateRequired { reason });
+                    }
                     Err(_) => {
                         // offline / store error: poll fast so a restored
                         // network triggers a cycle within ~2 s (per-op
@@ -422,6 +480,8 @@ async fn main() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             sync_status,
@@ -432,10 +492,16 @@ async fn main() {
             offline_reports,
             local_write,
             local_payment_lookup,
-            sync_now
+            sync_now,
+            update_check,
+            update_install,
+            update_required
         ])
-        .setup(move |_app| {
+        .setup(move |app| {
             tracing::info!("HMS desktop shell started; db at {:?}", db_path);
+            // D3: background update check on start and every few hours
+            let updates = app.state::<AppState>().updates.clone();
+            updater::spawn_checker(app.handle().clone(), updates);
             Ok(())
         })
         .run(tauri::generate_context!())

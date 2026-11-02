@@ -8,6 +8,7 @@ import { useAuth } from '../api/auth'
 import { api, sessionHasPermission } from '../api/client'
 import { desktop, isDesktop } from '../api/desktop'
 import { SyncStatusPill } from './SyncStatus'
+import { UpdatePill } from './UpdatePill'
 import {
   IconBed, IconBell, IconCalendar, IconChart, IconChevronRight, IconDashboard,
   IconGlobe, IconHotel, IconList, IconLogout, IconMoon, IconPlus, IconSun,
@@ -258,6 +259,7 @@ export function AppShell() {
               </button>
             )}
             <SyncStatusPill />
+            <UpdatePill />
             <button className="icon-btn" aria-label={t('shell.notifications')} title={t('shell.notifications')}><IconBell /></button>
             <button className="icon-btn" aria-label={t('shell.language')} title={t('shell.language')}><IconGlobe /></button>
             <button

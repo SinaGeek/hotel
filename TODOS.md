@@ -62,13 +62,19 @@ This is the main missing piece of the product vision.
 
 ## P0-D. Self-updating desktop app
 
-- [ ] **D1.** Generate the minisign keypair (`pnpm tauri signer generate`); private key only in CI secrets; public key in `tauri.conf.json`.
-- [ ] **D2.** Add `tauri-plugin-updater` (Rust) and `@tauri-apps/plugin-updater` (web); set `bundle.createUpdaterArtifacts: true` and the endpoint URL.
-- [ ] **D3.** Update UX: background check on start and every few hours, "Update available" pill, download in background, install on restart or click, never during an unsaved form.
-- [ ] **D4.** Force-update path: when the server returns `426` (protocol too old), the app must update before syncing again.
-- [ ] **D5.** Safe upgrades: attempt a sync before installing; run SQLite migrations on first start of the new version; preserve local DB, key and outbox.
-- [ ] **D6.** CI `release` workflow: build web + MSI, sign, publish MSI and `latest.json` to the update host.
+- [x] **D1.** Generate the minisign keypair (`pnpm tauri signer generate`); private key only in CI secrets; public key in `tauri.conf.json`.
+  - Done: keypair generated with `tauri signer generate` into `%USERPROFILE%\.hms-signing\hms.key` (+ `.pub` and a generated password file), deliberately **outside** the repo. Public key embedded in `apps/desktop/src-tauri/tauri.conf.json` → `plugins.updater.pubkey`; private key + password documented as the CI secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+- [x] **D2.** Add `tauri-plugin-updater` (Rust) and `@tauri-apps/plugin-updater` (web); set `bundle.createUpdaterArtifacts: true` and the endpoint URL.
+  - Done: `tauri-plugin-updater` 2.14 + `tauri-plugin-process` registered in `main.rs`; `plugins.updater.endpoints` set (placeholder host `updates.hms.example`, documented in `docs/updater.md`); `bundle.createUpdaterArtifacts: true`. The webview talks to the Rust side through typed commands (`update_check`/`update_install`/`update_required`) instead of adding a second JS plugin surface.
+- [x] **D3.** Update UX: background check on start and every few hours, "Update available" pill, download in background, install on restart or click, never during an unsaved form.
+  - Done: `updater::spawn_checker` runs at start and every 4 h; `UpdatePill.tsx` in the header shows "Update X available" with an explicit **Install** button — nothing installs without a click, so an unsaved form is never pulled away; the download happens on that action and status flows through the pill (Installing → Installed).
+- [x] **D4.** Force-update path: when the server returns `426` (protocol too old), the app must update before syncing again.
+  - Done: `SyncFailure::UpdateRequired` is handled in both `sync_now` and the background worker — it sets a sticky `UpdateState.forced` flag and publishes `SyncState::UpdateRequired`. The pill turns red ("Update required"), the sync pill explains syncing is blocked, and `update_required` exposes the flag. Test: `updater::tests::d4_forced_flag_is_sticky_once_the_server_refuses_the_protocol`.
+- [x] **D5.** Safe upgrades: attempt a sync before installing; run SQLite migrations on first start of the new version; preserve local DB, key and outbox.
+  - Done: `download_and_install` awaits a `sync_first` callback (a full `run_cycle`) and aborts the install if that sync fails, so no queued write is stranded. `hms.sqlite` + `hms.key` live in `%APPDATA%`, outside the install dir; migrations run on first open of the new build (`PRAGMA user_version`).
+- [x] **D6.** CI `release` workflow: build web + MSI, sign, publish MSI and `latest.json` to the update host.
   - Accept: install version N, publish N+1, app offers and applies the update; a tampered package is rejected; local data survives.
+  - Done: `.github/workflows/release.yml` (tag `v*`) builds the web bundle, runs `tauri build` with the signing secrets, collects the MSI + `.sig`, writes `latest.json`, uploads artifacts, and publishes when `UPDATE_PUBLISH_CMD` is set. Signature verification happens inside `download()` against the embedded public key, so a tampered package fails before `install()`. The end-to-end N → N+1 run requires the real update host and signing secrets, which are deployment inputs; see `docs/updater.md` §5 for the checklist.
 
 ## P0-E. Production stack verification
 
