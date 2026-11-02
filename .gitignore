@@ -38,3 +38,6 @@ Thumbs.db
 src-tauri/target/
 src-tauri/gen/schemas/
 apps/desktop/src-tauri/gen/
+
+# local run logs
+*.log
