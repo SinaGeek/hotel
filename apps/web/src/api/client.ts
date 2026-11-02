@@ -190,6 +190,7 @@ export const api = {
   listReservations: (q?: ReservationListQuery) => request<ReservationDto[]>('/reservations', { query: q as ReqInit['query'] }),
   reservationsCount: (q?: ReservationListQuery) => request<number>('/reservations/count', { query: q as ReqInit['query'] }),
   getReservation: (id: string) => request<ReservationDto>(`/reservations/${id}`),
+  suggestedRooms: (id: string) => request<RoomDto[]>(`/reservations/${id}/suggested-rooms`),
   createReservation: (b: CreateReservationBody) => {
     if (!isDesktop) return request<ReservationDto>('/reservations', { method: 'POST', body: b })
     // local-first (todo A1): staged offline-capable create; canonical values

@@ -46,6 +46,8 @@ export function AppShell() {
   const hotelCode = session?.user.hotel_id
 
   const [hotelName, setHotelName] = useState<string | null>(null)
+  const [conflictCount, setConflictCount] = useState(0)
+  const [newConflictAlert, setNewConflictAlert] = useState<number | null>(null)
   const hotelId = session?.user.hotel_id
   useEffect(() => {
     if (hotelId === undefined) return
@@ -62,6 +64,46 @@ export function AppShell() {
       .catch(() => { /* header falls back to the code only */ })
     return () => { alive = false }
   }, [hotelId])
+
+  // Conflict polling (B2 header count + B4 post-sync notification dialog)
+  useEffect(() => {
+    if (!session || isHk) return
+    let alive = true
+    let prev = 0
+    let initialized = false
+
+    const checkConflicts = async () => {
+      try {
+        let count = 0
+        if (isDesktop) {
+          const s = await desktop.syncStatus()
+          if (s.state === 'Synced') {
+            count = (s.detail as { conflicts: number }).conflicts ?? 0
+          } else {
+            count = await api.reservationsCount({ status: 'conflict' })
+          }
+        } else {
+          count = await api.reservationsCount({ status: 'conflict' })
+        }
+        if (!alive) return
+        setConflictCount(count)
+        if (initialized && count > prev) {
+          setNewConflictAlert(count)
+        }
+        prev = count
+        initialized = true
+      } catch {
+        /* best effort */
+      }
+    }
+
+    void checkConflicts()
+    const iv = setInterval(checkConflicts, 10_000)
+    return () => {
+      alive = false
+      clearInterval(iv)
+    }
+  }, [session, isHk])
 
   // theme toggle (light default, persisted)
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
@@ -194,6 +236,27 @@ export function AppShell() {
             </div>
           </div>
           <div className="header-right">
+            {conflictCount > 0 && (
+              <button
+                className="icon-btn"
+                style={{
+                  backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                  color: '#d97706',
+                  fontWeight: 600,
+                  borderRadius: 16,
+                  padding: '4px 10px',
+                  fontSize: 13,
+                  width: 'auto',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+                onClick={() => navigate('/reservations?tab=conflict')}
+                title={t('bk.conflictBanner', { n: conflictCount })}
+              >
+                ⚠️ {conflictCount} {t('bk.tabs.conflict')}
+              </button>
+            )}
             <SyncStatusPill />
             <button className="icon-btn" aria-label={t('shell.notifications')} title={t('shell.notifications')}><IconBell /></button>
             <button className="icon-btn" aria-label={t('shell.language')} title={t('shell.language')}><IconGlobe /></button>
@@ -218,6 +281,37 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+
+      {newConflictAlert != null && (
+        <div className="modal-back" onClick={() => setNewConflictAlert(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <h3>⚠️ {t('bk.conflictAlertTitle')}</h3>
+            <p style={{ margin: '12px 0 20px', lineHeight: 1.5 }}>
+              {t('bk.conflictAlertMsg', { n: newConflictAlert })}
+            </p>
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setNewConflictAlert(null)}
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                className="primary"
+                style={{ backgroundColor: '#d97706', borderColor: '#b45309' }}
+                onClick={() => {
+                  setNewConflictAlert(null)
+                  navigate('/reservations?tab=conflict')
+                }}
+              >
+                {t('bk.resolveConflicts')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* "new record" shortcut; Monthly Room supports create from the board */}
       <button className="fab" onClick={() => navigate('/board')} aria-label={t('shell.newRecord')} title={t('shell.newRecord')}>

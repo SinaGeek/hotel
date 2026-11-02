@@ -38,11 +38,16 @@ This is the main missing piece of the product vision.
 
 ## P0-B. Overbooking / conflict handling
 
-- [ ] **B1. Conflict status end to end:** server returns `conflict` for the later booking (already in sync apply); verify the desktop and web both show it.
-- [ ] **B2. Conflict banner and list** in web and desktop: count in the header, filterable list of `conflict` reservations with guest, dates, requested room.
-- [ ] **B3. Reassignment tool:** suggest free rooms of the same type for the same dates, move the reservation in one click (server validates, audit-logged), or cancel it. Resolved items leave the conflict list.
-- [ ] **B4. Notification after sync:** if a sync produced new conflicts, show a prominent dialog ("N bookings need a new room").
-- [ ] **B5. Tests:** two desktops book the same room offline -> first to reach the server keeps the room, second becomes `conflict`, nothing lost, reassignment works. Extend `crates/hms-tests/tests/sync_live.rs`.
+- [x] **B1. Conflict status end to end:** server returns `conflict` for the later booking (already in sync apply); verify the desktop and web both show it.
+  - Done: server sets `conflict` for overlapping offline bookings (EXCLUDE + SAVEPOINT); desktop mirror reflects `conflict` status; Board renders gold stay bar, StatusPill styles conflict; Reservations list renders conflict status.
+- [x] **B2. Conflict banner and list** in web and desktop: count in the header, filterable list of `conflict` reservations with guest, dates, requested room.
+  - Done: Header badge in `AppShell.tsx` (`⚠️ N Conflicts`), prominent warning banner across Reservations view; dedicated `conflict` tab (`/reservations?tab=conflict`) with guest, requested room, dates, balance, total, and one-click Resolve action.
+- [x] **B3. Reassignment tool:** suggest free rooms of the same type for the same dates, move the reservation in one click (server validates, audit-logged), or cancel it. Resolved items leave the conflict list.
+  - Done: `GET /api/v1/reservations/{id}/suggested-rooms` endpoint orders free rooms of the same room type first; `ReassignModal.tsx` provides one-click reassignment (calling `api.editReservation`), moving the reservation to a free room and promoting status from `conflict` to `confirmed`; server updates `daily_revenue`, records `reassigned` in `audit_log`, and echoes canonical change record. Cancellation supported in one click (`api.cancelReservation`). Resolved items automatically leave the conflict list.
+- [x] **B4. Notification after sync:** if a sync produced new conflicts, show a prominent dialog ("N bookings need a new room").
+  - Done: `AppShell.tsx` tracks conflict counts across sync ticks; when a sync produces new conflicts, a prominent modal dialog appears (`⚠️ New Booking Conflicts Detected: N booking(s) require a new room due to overlapping stays`) with a direct "Resolve Conflicts" shortcut to `/reservations?tab=conflict`.
+- [x] **B5. Tests:** two desktops book the same room offline -> first to reach the server keeps the room, second becomes `conflict`, nothing lost, reassignment works. Extend `crates/hms-tests/tests/sync_live.rs`.
+  - Done: `two_offline_clients_same_room_lands_conflict` in `crates/hms-tests/tests/sync_live.rs` verifies that client A stays confirmed, client B lands conflict, `/suggested-rooms` finds free room 102, PATCH reassigns to room 102, promoting status to `confirmed`, no conflicts remain, and audit_log records `action = 'reassigned'`.
 
 ## P0-C. SQLCipher-encrypted local database
 

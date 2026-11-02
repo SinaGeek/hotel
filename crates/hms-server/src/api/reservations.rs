@@ -16,6 +16,7 @@ pub fn router() -> Router<AppState> {
         .route("/", get(list).post(create))
         .route("/count", get(count))
         .route("/{id}", get(by_id).patch(edit))
+        .route("/{id}/suggested-rooms", get(suggested_rooms))
         .route("/{id}/check-in", post(check_in))
         .route("/{id}/check-out", post(check_out))
         .route("/{id}/cancel", post(cancel))
@@ -505,15 +506,25 @@ pub async fn edit(
 
     let (rates, total) = rates_for_stay(&mut conn, auth.hotel_id, room_id, checkin, checkout, &existing.currency).await?;
 
+    // B3: If a reservation was in `conflict` status, reassigning to a room
+    // attempts to promote it to `confirmed`. PostgreSQL's `no_double_booking`
+    // EXCLUDE constraint validates that the target room is truly free.
+    let target_status = if existing.status == "conflict" {
+        "confirmed".to_string()
+    } else {
+        existing.status.clone()
+    };
+
     sqlx::query(
         r#"UPDATE reservations SET
              room_id = $2, channel_id = $3, guest_id = $4,
              stay = daterange($5,$6,'[)'), checkin_date = $5, checkout_date = $6,
-             daily_rates = $7, total_price_cents = $8,
-             adults = COALESCE($9, adults), children = COALESCE($10, children),
-             notes = COALESCE($11, notes), voucher_number = COALESCE($12, voucher_number),
+             status = $7,
+             daily_rates = $8, total_price_cents = $9,
+             adults = COALESCE($10, adults), children = COALESCE($11, children),
+             notes = COALESCE($12, notes), voucher_number = COALESCE($13, voucher_number),
              updated_at = now()
-           WHERE id = $1 AND hotel_id = $13"#,
+           WHERE id = $1 AND hotel_id = $14"#,
     )
     .bind(id)
     .bind(room_id)
@@ -521,6 +532,7 @@ pub async fn edit(
     .bind(guest_id)
     .bind(checkin)
     .bind(checkout)
+    .bind(&target_status)
     .bind(serde_json::to_value(&rates).unwrap_or_default())
     .bind(total)
     .bind(body.adults)
@@ -533,12 +545,16 @@ pub async fn edit(
     .map_err(|e| ApiError(StatusCode::CONFLICT, format!("update not allowed (no double booking): {e}")))?;
 
     let op_id = Uuid::now_v7();
-    // record_change last (row-locks the hotels row until commit ? see create)
-    db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "reservation", id, "updated",
+    let action = if existing.status == "conflict" && target_status == "confirmed" {
+        "reassigned"
+    } else {
+        "updated"
+    };
+    db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "reservation", id, action,
         Some(serde_json::to_value(&existing).unwrap_or_default()), Some(serde_json::json!(&body))).await?;
     upsert_daily_revenue(&mut conn, &ReservationUpsertInfo {
         hotel_id: auth.hotel_id, room_id, channel_id, checkin_date: checkin, checkout_date: checkout,
-        status: existing.status.clone(), daily_rates: serde_json::to_value(&rates).unwrap_or_default(),
+        status: target_status.clone(), daily_rates: serde_json::to_value(&rates).unwrap_or_default(),
     }).await?;
     let echo = reservation_echo(&mut conn, auth.hotel_id, id).await
         .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -553,6 +569,63 @@ pub async fn edit(
     .await
     .map_err(ApiError::from)?;
     Ok(Json(ApiResponse { success: true, data: row, error: None }))
+}
+
+/// B3: Reassignment tool helper — finds free rooms in the hotel for this
+/// reservation's dates. Rooms of the same room type appear first.
+async fn suggested_rooms(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+) -> AResult<Json<ApiResponse<Vec<crate::api::rooms::RoomDto>>>> {
+    if !crate::auth::has_permission(&state.db, &auth.role, auth.hotel_id, hms_core::roles::Permission::ReservationView).await? {
+        return Err(ApiError(StatusCode::FORBIDDEN, "reservation_view required".into()));
+    }
+    let mut conn = state.db.acquire().await.map_err(ApiError::from)?;
+    db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
+
+    let res: (Uuid, chrono::NaiveDate, chrono::NaiveDate) = sqlx::query_as(
+        "SELECT room_id, checkin_date, checkout_date FROM reservations WHERE id = $1 AND hotel_id = $2 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .bind(auth.hotel_id)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(|_| ApiError(StatusCode::NOT_FOUND, "reservation not found".into()))?;
+
+    let room_type_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT room_type_id FROM rooms WHERE id = $1 AND hotel_id = $2 AND deleted_at IS NULL",
+    )
+    .bind(res.0)
+    .bind(auth.hotel_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(ApiError::from)?;
+
+    let available: Vec<crate::api::rooms::RoomDto> = sqlx::query_as(
+        r#"SELECT r.id, r.room_type_id, r.room_number, r.floor, r.cleanliness
+           FROM rooms r
+           WHERE r.hotel_id = $1 AND r.deleted_at IS NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM reservations other
+                 WHERE other.hotel_id = $1 AND other.room_id = r.id
+                   AND other.id <> $2
+                   AND other.deleted_at IS NULL
+                   AND other.status NOT IN ('cancelled', 'conflict')
+                   AND (other.checkin_date, other.checkout_date) OVERLAPS ($3::date, $4::date)
+             )
+           ORDER BY (CASE WHEN r.room_type_id = $5 THEN 0 ELSE 1 END), r.room_number"#,
+    )
+    .bind(auth.hotel_id)
+    .bind(id)
+    .bind(res.1)
+    .bind(res.2)
+    .bind(room_type_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(ApiError::from)?;
+
+    Ok(Json(ApiResponse { success: true, data: available, error: None }))
 }
 
 pub async fn status_change(

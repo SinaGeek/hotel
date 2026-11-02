@@ -9,13 +9,15 @@ import { api, ApiError, sessionHasPermission } from '../api/client'
 import { useAuth } from '../api/auth'
 import { FilterBar, ListFooter, PageHeader, StatusPill } from '../components/ui'
 import { NewReservationModal, ReservationDetailModal, fmtMoney } from '../components/reservation-modals'
+import { ReassignModal } from '../components/ReassignModal'
 import type { BoardRoom, ChannelDto, GuestDto, ReservationListQuery, ReservationDto, RoomTypeDto } from '../types/generated/api'
 
-type Tab = 'active' | 'upcoming' | 'archive' | 'cancelled' | 'all'
-const TABS: Tab[] = ['active', 'upcoming', 'archive', 'cancelled', 'all']
+type Tab = 'active' | 'upcoming' | 'conflict' | 'archive' | 'cancelled' | 'all'
+const TABS: Tab[] = ['active', 'upcoming', 'conflict', 'archive', 'cancelled', 'all']
 const TAB_QUERY: Record<Tab, ReservationListQuery> = {
   active: { status: 'checked_in' },
   upcoming: { status: 'confirmed' },
+  conflict: { status: 'conflict' },
   archive: { status: 'checked_out' },
   cancelled: { status: 'cancelled' },
   all: {},
@@ -46,11 +48,28 @@ export function Reservations() {
   const [busy, setBusy] = useState(false)
   const [creating, setCreating] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
+  const [reassignRes, setReassignRes] = useState<ReservationDto | null>(null)
+  const [conflictCount, setConflictCount] = useState(0)
 
   const query = useMemo<ReservationListQuery>(
     () => ({ ...TAB_QUERY[tab], from: dateFrom || undefined, to: dateTo || undefined }),
     [tab, dateFrom, dateTo],
   )
+
+  useEffect(() => {
+    let alive = true
+    api.reservationsCount({ status: 'conflict' })
+      .then((c) => { if (alive) setConflictCount(c) })
+      .catch(() => { /* count is best effort */ })
+    return () => { alive = false }
+  }, [rows])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('tab') === 'conflict') {
+      setTab('conflict')
+    }
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -135,10 +154,41 @@ export function Reservations() {
       )} />
       {error && <p style={{ color: 'red' }}>{t('common.error')}: {error}</p>}
 
+      {conflictCount > 0 && tab !== 'conflict' && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 16,
+            backgroundColor: 'rgba(245, 158, 11, 0.12)',
+            borderColor: 'rgba(245, 158, 11, 0.4)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '12px 16px',
+          }}
+        >
+          <span style={{ fontWeight: 600, color: '#92400e' }}>
+            ⚠️ {t('bk.conflictBanner', { n: conflictCount })}
+          </span>
+          <button
+            className="primary"
+            style={{ backgroundColor: '#d97706', borderColor: '#b45309' }}
+            onClick={() => setTab('conflict')}
+          >
+            {t('bk.resolveConflicts')}
+          </button>
+        </div>
+      )}
+
       <div className="seg" role="tablist" aria-label={t('bk.view')}>
         {TABS.map((tb) => (
-          <button key={tb} className={tab === tb ? 'on' : ''} onClick={() => setTab(tb)}>
-            {t(`bk.tabs.${tb}`)}
+          <button
+            key={tb}
+            className={tab === tb ? 'on' : ''}
+            onClick={() => setTab(tb)}
+            style={tb === 'conflict' && conflictCount > 0 ? { color: '#d97706', fontWeight: 600 } : undefined}
+          >
+            {t(`bk.tabs.${tb}`)} {tb === 'conflict' && conflictCount > 0 ? `(${conflictCount})` : ''}
           </button>
         ))}
       </div>
@@ -180,11 +230,12 @@ export function Reservations() {
             <th>#</th><th>{t('res.guest')}</th><th>{t('rooms.number')}</th>
             <th>{t('res.checkin')}</th><th>{t('res.checkout')}</th>
             <th>{t('res.status')}</th><th>{t('bk.balance')}</th><th>{t('res.total')}</th>
+            {tab === 'conflict' && <th>{t('bk.reassign')}</th>}
           </tr>
         </thead>
         <tbody>
           {visible.length === 0 && !busy && (
-            <tr><td colSpan={8} className="muted" style={{ textAlign: 'center' }}>{t('bk.noRows')}</td></tr>
+            <tr><td colSpan={tab === 'conflict' ? 9 : 8} className="muted" style={{ textAlign: 'center' }}>{t('bk.noRows')}</td></tr>
           )}
           {visible.map((r, i) => {
             const guest = r.guest_id ? guests.find((g) => g.id === r.guest_id)?.full_name : null
@@ -204,6 +255,20 @@ export function Reservations() {
                 {/* balance needs per-row payments aggregation; shown as empty */}
                 <td className="muted">—</td>
                 <td>{fmtMoney(r.total_price_cents, r.currency)}</td>
+                {tab === 'conflict' && (
+                  <td>
+                    <button
+                      className="primary"
+                      style={{ fontSize: 12, padding: '4px 8px' }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setReassignRes(r)
+                      }}
+                    >
+                      {t('bk.reassign')}
+                    </button>
+                  </td>
+                )}
               </tr>
             )
           })}
@@ -236,7 +301,27 @@ export function Reservations() {
         />
       )}
       {detailId != null && (
-        <ReservationDetailModal id={detailId} onClose={() => setDetailId(null)} onChanged={() => void loadPage(afterStack[afterStack.length - 1])} />
+        <ReservationDetailModal
+          id={detailId}
+          onClose={() => setDetailId(null)}
+          onChanged={() => void loadPage(afterStack[afterStack.length - 1])}
+          onReassign={(r) => {
+            setDetailId(null)
+            setReassignRes(r)
+          }}
+        />
+      )}
+      {reassignRes != null && (
+        <ReassignModal
+          reservation={reassignRes}
+          rooms={rooms}
+          guests={guests}
+          onClose={() => setReassignRes(null)}
+          onResolved={() => {
+            setReassignRes(null)
+            void loadPage(undefined)
+          }}
+        />
       )}
     </div>
   )

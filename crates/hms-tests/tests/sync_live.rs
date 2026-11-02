@@ -51,6 +51,7 @@ struct SyncFixture {
     hotel_id: i64,
     username: String,
     room_id: Uuid,
+    room_id_2: Uuid,
     channel_id: Uuid,
 }
 
@@ -67,6 +68,7 @@ async fn fixture(pool: &PgPool) -> Result<SyncFixture, Box<dyn std::error::Error
     let ch = Uuid::now_v7();
     let uid = Uuid::now_v7();
     let room = Uuid::now_v7();
+    let room2 = Uuid::now_v7();
     let username = format!("syncuser{nanos:x}");
     let salt = SaltString::generate(&mut argon2::password_hash::rand_core::OsRng);
     let hash = Argon2::default()
@@ -112,12 +114,21 @@ async fn fixture(pool: &PgPool) -> Result<SyncFixture, Box<dyn std::error::Error
     .bind(rt)
     .execute(&mut *tx)
     .await?;
+    sqlx::query(
+        "INSERT INTO rooms (id, hotel_id, room_type_id, room_number) VALUES ($1,$2,$3,'sync-102')",
+    )
+    .bind(room2)
+    .bind(hotel_id)
+    .bind(rt)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
 
     Ok(SyncFixture {
         hotel_id,
         username,
         room_id: room,
+        room_id_2: room2,
         channel_id: ch,
     })
 }
@@ -163,6 +174,32 @@ impl SyncEnv {
             .send()
             .await
             .map_err(|e| format!("post {path}: {e}"))?;
+        assert_eq!(
+            r.status(),
+            expect,
+            "unexpected status from {path}: {} (body: {})",
+            r.status(),
+            r.text().await.unwrap_or_default()
+        );
+        let resp: Value = r.json().await.map_err(|e| e.to_string())?;
+        assert_eq!(resp["success"], true, "ApiResponse not successful");
+        Ok(serde_json::from_value(resp["data"].clone()).map_err(|e| e.to_string())?)
+    }
+
+    async fn patch_json<T: serde::de::DeserializeOwned>(
+        &self,
+        token: &str,
+        path: &str,
+        body: &Value,
+        expect: reqwest::StatusCode,
+    ) -> Result<T, String> {
+        let r = client_like()
+            .patch(format!("{}/api/v1{path}", self.api))
+            .bearer_auth(token)
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| format!("patch {path}: {e}"))?;
         assert_eq!(
             r.status(),
             expect,
@@ -353,7 +390,7 @@ async fn two_offline_clients_same_room_lands_conflict() {
     assert_eq!(op_status(&r["results"][0]), "applied");
 
     // client B: overlapping range (11 nights from today -> overlaps by 1 night)
-    let (_id_b, b) = res_op(f.hotel_id, f.room_id, f.channel_id, 11);
+    let (id_b, b) = res_op(f.hotel_id, f.room_id, f.channel_id, 11);
     let r2: Value = env
         .push_json(&token, &push_req(f.hotel_id, vec![b]))
         .await
@@ -374,6 +411,42 @@ async fn two_offline_clients_same_room_lands_conflict() {
     let _ = id_a;
     let pull = env.pull_json(&token, 0).await.unwrap();
     assert_eq!(pull["records"].as_array().unwrap().len(), 2, "both echoes stream out");
+
+    // B5: Reassignment tool verification (suggest free rooms, move in one click,
+    // server validates and checks no-double-booking, sets status=confirmed, audit-logged)
+    let suggested: Vec<Value> = env
+        .get_json(&token, &format!("/reservations/{id_b}/suggested-rooms"))
+        .await
+        .unwrap();
+    assert!(
+        suggested.iter().any(|r| r["id"].as_str() == Some(&f.room_id_2.to_string())),
+        "suggested rooms must include free room_id_2"
+    );
+
+    let reassigned: Value = env
+        .patch_json(
+            &token,
+            &format!("/reservations/{id_b}"),
+            &serde_json::json!({ "room_id": f.room_id_2 }),
+            reqwest::StatusCode::OK,
+        )
+        .await
+        .unwrap();
+    assert_eq!(reassigned["status"], "confirmed", "reassignment promotes conflict to confirmed");
+
+    let statuses_after = reservation_statuses(&env.pool, f.hotel_id).await.unwrap();
+    assert_eq!(statuses_after.iter().filter(|(_, s)| s == "confirmed").count(), 2);
+    assert_eq!(statuses_after.iter().filter(|(_, s)| s == "conflict").count(), 0, "no conflicts remain");
+
+    let audit_reassigned: (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM audit_log WHERE hotel_id = $1 AND entity_id = $2 AND action = 'reassigned'",
+    )
+    .bind(f.hotel_id)
+    .bind(id_b)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_reassigned.0, 1, "audit log must record reassignment");
 }
 
 /// Far-future client timestamps are rejected outright (Â§11.4) and never echo?

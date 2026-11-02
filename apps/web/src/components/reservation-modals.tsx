@@ -99,7 +99,12 @@ export function NewReservationModal(props: {
 }
 
 // --------------------------------------------------------------- detail modal
-export function ReservationDetailModal(props: { id: string; onClose: () => void; onChanged: () => void }) {
+export function ReservationDetailModal(props: {
+  id: string
+  onClose: () => void
+  onChanged: () => void
+  onReassign?: (r: ReservationDto) => void
+}) {
   const { t } = useTranslation()
   const { session } = useAuth()
   const can = (perm: string) => sessionHasPermission(session, perm)
@@ -162,6 +167,11 @@ export function ReservationDetailModal(props: { id: string; onClose: () => void;
           {can('reservation_check_in') && res.status === 'confirmed' && <button className="primary" onClick={() => void status('checkIn')}>{t('res.checkin')}</button>}
 
           {can('reservation_check_out') && res.status === 'checked_in' && <button className="primary" onClick={() => void status('checkOut')}>{t('res.checkout')}</button>}
+          {res.status === 'conflict' && props.onReassign && (
+            <button className="primary" style={{ backgroundColor: '#d97706', borderColor: '#b45309' }} onClick={() => props.onReassign!(res)}>
+              ⚠️ {t('bk.reassign')}
+            </button>
+          )}
           {can('reservation_cancel') && (res.status === 'confirmed' || res.status === 'conflict') && <button className="danger" onClick={() => void status('cancelReservation')}>{t('res.cancel')}</button>}
         </div>
 
