@@ -107,14 +107,39 @@ pub fn compute(store: &LocalStore, from: NaiveDate, to: NaiveDate) -> Result<Val
 
     let mut acc = Acc::default();
 
+    // A3: mirror-side pricing inputs — the server computes room revenue from
+    // `daily_rates` (upsert_daily_revenue), with price_rules and the room
+    // type's base price as fallbacks; mirror the exact same precedence so
+    // offline reports agree with the server's daily_revenue aggregation.
+    let mut all_rules: Vec<(String, String, String, i64)> = Vec::new();
+    {
+        let mut stmt = store
+            .conn
+            .prepare("SELECT room_type_id, date_from, date_to, price_cents FROM price_rules")
+            .map_err(|e| e.to_string())?;
+        let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+        while let Some(r) = rows.next().map_err(|e| e.to_string())? {
+            all_rules.push((
+                r.get(0).map_err(es)?,
+                r.get(1).map_err(es)?,
+                r.get(2).map_err(es)?,
+                r.get(3).map_err(es)?,
+            ));
+        }
+    }
+
     // ---- reservations: room accrual + occupied nights
     {
         let mut stmt = store
             .conn
             .prepare(
-                r#"SELECT room_id, channel_id, checkin_date, checkout_date, total_price_cents
-                     FROM reservations
-                    WHERE deleted_at IS NULL AND status NOT IN ('cancelled','conflict')"#,
+                r#"SELECT res.room_id, res.channel_id, res.checkin_date, res.checkout_date,
+                          res.total_price_cents, res.daily_rates, ro.room_type_id,
+                          COALESCE(rt.base_price_cents, 0)
+                     FROM reservations res
+                     LEFT JOIN rooms ro ON ro.id = res.room_id
+                     LEFT JOIN room_types rt ON rt.id = ro.room_type_id
+                    WHERE res.deleted_at IS NULL AND res.status NOT IN ('cancelled','conflict')"#,
             )
             .map_err(|e| e.to_string())?;
         let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
@@ -135,6 +160,9 @@ pub fn compute(store: &LocalStore, from: NaiveDate, to: NaiveDate) -> Result<Val
                 .as_deref()
                 .and_then(parse_date);
             let total: i64 = r.get(4).map_err(es)?;
+            let rates_json: Option<String> = r.get(5).ok();
+            let room_type_id: Option<String> = r.get(6).ok();
+            let base_price: i64 = r.get(7).unwrap_or(0);
             let (Some(ci), Some(co)) = (ci, co) else {
                 continue;
             };
@@ -142,9 +170,52 @@ pub fn compute(store: &LocalStore, from: NaiveDate, to: NaiveDate) -> Result<Val
             if nights_all <= 0 {
                 continue;
             }
+            // per-night priced rates with the exact server fallback chain;
+            // if nothing prices a night we fall back to the even split below
+            let priced: Vec<Option<i64>> = (0..nights_all)
+                .map(|i| {
+                    let day = ci + Duration::days(i);
+                    let day_str = day.to_string();
+                    if let Some(js) = &rates_json {
+                        if let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(js) {
+                            for e in &arr {
+                                if e["date"].as_str() == Some(&day_str) {
+                                    return e["price_cents"].as_i64().filter(|p| *p >= 0);
+                                }
+                            }
+                        }
+                    }
+                    if let Some(rt) = &room_type_id {
+                        let rule: Option<i64> = all_rules
+                            .iter()
+                            .filter(|(rt_id, from, to, _)| {
+                                rt_id == rt
+                                    && parse_date(from).is_some_and(|f| f <= day)
+                                    && parse_date(to).is_some_and(|t| t >= day)
+                            })
+                            .max_by_key(|(_, from, _, _)| from.clone())
+                            .map(|(_, _, _, price)| *price)
+                            .filter(|p| *p > 0);
+                        if let Some(p) = rule {
+                            return Some(p);
+                        }
+                        if base_price > 0 {
+                            return Some(base_price);
+                        }
+                    }
+                    None
+                })
+                .collect();
+            let per_night: Vec<i64> = if priced.iter().all(|p| p.is_some()) {
+                priced.into_iter().map(|p| p.unwrap()).collect()
+            } else {
+                // unpriced (e.g. an offline create staged before its pull):
+                // near-even spread over the stay nights
+                nightly_split(total, nights_all)
+            };
             // only the nights inside the report range contribute dollars,
             // but occupancy counts the same nights so the shapes agree
-            for (i, cents) in nightly_split(total, nights_all).into_iter().enumerate() {
+            for (i, cents) in per_night.into_iter().enumerate() {
                 let day = ci + Duration::days(i as i64);
                 if day < from || day >= to {
                     continue;
@@ -514,6 +585,57 @@ mod tests {
         assert_eq!(by_room[0]["occupied_nights"].as_i64().unwrap(), 3);
         assert_eq!(by_room[1]["room_number"], "2001");
         assert_eq!(by_room[1]["room_revenue_cents"].as_i64().unwrap(), 0);
+    }
+
+    #[test]
+    fn a3_priced_rates_drive_room_revenue_then_price_rules_then_base() {
+        let mut s = seeded();
+        // server-pulled reservation WITH daily_rates: matches the server's
+        // upsert_daily_revenue per-night rates exactly (not an even split)
+        apply(
+            &mut s,
+            3,
+            EntityType::Reservation,
+            Uuid::now_v7(),
+            serde_json::json!({
+                "room_id": "r2", "channel_id": "c1",
+                "checkin_date": "2026-09-20", "checkout_date": "2026-09-22",
+                "status": "confirmed", "total_price_cents": 33000, "adults": 2,
+                "daily_rates": [
+                    {"date": "2026-09-20", "price_cents": 12000},
+                    {"date": "2026-09-21", "price_cents": 21000},
+                ],
+            }),
+        );
+        // unpriced reservation (no rates): price_rules apply for the suite,
+        // then the room type base price: 2000 + shared
+        apply(
+            &mut s,
+            4,
+            EntityType::PriceRule,
+            Uuid::now_v7(),
+            serde_json::json!({
+                "room_type_id": "t1", "date_from": "2026-09-21", "date_to": "2026-09-21",
+                "price_cents": 2000, "currency": "TRY"
+            }),
+        );
+
+        let v = compute(&s, date(2026, 9, 20), date(2026, 9, 22))
+            .unwrap_or_else(|e| panic!("compute failed: {e}"));
+        let by_day = v["by_day"].as_array().unwrap();
+        let by_date = |d: &str| {
+            by_day
+                .iter()
+                .find(|row| row["date"] == d)
+                .unwrap_or_else(|| panic!("no row for {d}"))
+        };
+        // Sep 20: resA unpriced -> base 10000; suite real rate 12000
+        assert_eq!(by_date("2026-09-20")["room_revenue_cents"].as_i64().unwrap(), 10000 + 12000);
+        // Sep 21: resA price rule 2000; suite real rate 21000
+        assert_eq!(by_date("2026-09-21")["room_revenue_cents"].as_i64().unwrap(), 2000 + 21000);
+        // summary = both days' accrual
+        assert_eq!(v["summary"]["room_revenue_cents"].as_i64().unwrap(), 10000 + 12000 + 2000 + 21000);
+        assert_eq!(v["summary"]["occupied_nights"].as_i64().unwrap(), 4);
     }
 
     #[test]

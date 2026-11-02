@@ -74,6 +74,16 @@ async fn add_folio(
         .await
         .map_err(|_| ApiError(StatusCode::NOT_FOUND, "reservation not found".into()))?;
     let total = body.unit_price_cents * (body.quantity as i64).max(1);
+    // including the nights for the per-even-night spread (A3: extras accrue
+    // over the stay like the desktop mirror does, dust on the first night)
+    let res_stay: (chrono::NaiveDate, chrono::NaiveDate) = sqlx::query_as(
+        "SELECT checkin_date, checkout_date FROM reservations WHERE id = $1 AND hotel_id = $2 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .bind(auth.hotel_id)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(|_| ApiError(StatusCode::NOT_FOUND, "reservation not found".into()))?;
 
     let fid = Uuid::now_v7();
     let op_id = Uuid::now_v7();
@@ -95,10 +105,20 @@ async fn add_folio(
     .await
     .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("folio insert: {e}")))?;
 
-    // extra revenue joins the stay dates' daily_revenue rows (README Â§10)
+    // extra revenue spreads OVER the stay nights (README §10): even split,
+    // rounding dust lands on the first night — identical to the desktop report
+    let res_room: (Uuid, Uuid) = sqlx::query_as("SELECT room_id, channel_id FROM reservations WHERE id = $1 AND hotel_id = $2 AND deleted_at IS NULL")
+        .bind(id)
+        .bind(auth.hotel_id)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|_| ApiError(StatusCode::NOT_FOUND, "reservation not found".into()))?;
+    let nights = (res_stay.1 - res_stay.0).num_days().max(1);
     sqlx::query(
         r#"UPDATE daily_revenue dr
-           SET extra_revenue_cents = dr.extra_revenue_cents + $3::bigint,
+           SET extra_revenue_cents = dr.extra_revenue_cents + CASE
+                 WHEN dr.date = res.checkin_date THEN $3::bigint - ($3::bigint / $4::bigint) * ($4::bigint - 1)
+                 ELSE $3::bigint / $4::bigint END,
                updated_at = now()
            FROM reservations res
            WHERE dr.hotel_id = $1 AND dr.room_id = res.room_id AND res.id = $2
@@ -107,6 +127,7 @@ async fn add_folio(
     .bind(auth.hotel_id)
     .bind(id)
     .bind(total)
+    .bind(nights)
     .execute(&mut *conn)
     .await
     .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("folio revenue: {e}")))?;

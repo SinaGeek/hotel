@@ -77,10 +77,10 @@ pub(crate) async fn reservation_echo(
     hotel_id: i64,
     id: Uuid,
 ) -> Result<serde_json::Value, String> {
-    let row: (Uuid, Uuid, Option<Uuid>, chrono::NaiveDate, chrono::NaiveDate, String, i64, i16, i16) =
+    let row: (Uuid, Uuid, Option<Uuid>, chrono::NaiveDate, chrono::NaiveDate, String, i64, i16, i16, serde_json::Value) =
         sqlx::query_as(
             "SELECT room_id, channel_id, guest_id, checkin_date, checkout_date,
-                    status, total_price_cents, adults, children
+                    status, total_price_cents, adults, children, daily_rates
              FROM reservations WHERE id = $1 AND hotel_id = $2",
         )
         .bind(id)
@@ -98,6 +98,7 @@ pub(crate) async fn reservation_echo(
         "total_price_cents": row.6,
         "adults": row.7,
         "children": row.8,
+        "daily_rates": row.9,
     }))
 }
 

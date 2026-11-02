@@ -906,8 +906,8 @@ async fn apply_folio(
         .unwrap_or(unit * qty as i64);
     let currency = p_opt_str(&op.payload, "currency")?.unwrap_or_else(|| "TRY".into());
 
-    let res: (Uuid, Uuid) = sqlx::query_as(
-        "SELECT room_id, channel_id FROM reservations WHERE id = $1 AND hotel_id = $2 AND deleted_at IS NULL",
+    let res: (Uuid, Uuid, chrono::NaiveDate, chrono::NaiveDate) = sqlx::query_as(
+        "SELECT room_id, channel_id, checkin_date, checkout_date FROM reservations WHERE id = $1 AND hotel_id = $2 AND deleted_at IS NULL",
     )
     .bind(reservation_id)
     .bind(auth.hotel_id)
@@ -933,18 +933,23 @@ async fn apply_folio(
     .await
     .map_err(|e| format!("folio insert: {e}"))?;
 
-    // extra revenue joins the stay dates' daily_revenue rows (README §10)
+    // extra revenue spreads OVER the stay nights (A3 parity with the desktop
+    // mirror): even split, rounding dust on the first night
+    let nights = (res.3 - res.2).num_days().max(1);
     sqlx::query(
         r#"UPDATE daily_revenue dr
-           SET extra_revenue_cents = dr.extra_revenue_cents + $3::bigint,
+           SET extra_revenue_cents = dr.extra_revenue_cents + CASE
+                 WHEN dr.date = res.checkin_date THEN $3::bigint - ($3::bigint / $4::bigint) * ($4::bigint - 1)
+                 ELSE $3::bigint / $4::bigint END,
                updated_at = now()
-           FROM reservations r
-           WHERE dr.hotel_id = $1 AND dr.room_id = r.room_id AND r.id = $2
-             AND dr.date >= r.checkin_date AND dr.date < r.checkout_date"#,
+           FROM reservations res
+           WHERE dr.hotel_id = $1 AND dr.room_id = res.room_id AND res.id = $2
+             AND dr.date >= res.checkin_date AND dr.date < res.checkout_date"#,
     )
     .bind(auth.hotel_id)
     .bind(reservation_id)
     .bind(total)
+    .bind(nights)
     .execute(&mut *conn)
     .await
     .map_err(|e| format!("daily_revenue extra: {e}"))?;

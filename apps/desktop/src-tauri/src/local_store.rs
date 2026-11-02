@@ -33,8 +33,21 @@ impl LocalStore {
             .map_err(se)?;
         conn.pragma_update(None, "synchronous", "NORMAL")
             .map_err(se)?;
+        Self::init_connection(conn)
+    }
+
+    fn init_connection(conn: Connection) -> Result<Self, StoreError> {
         conn.execute_batch(include_str!("../desktop-migrations/0001_init.sql"))
             .map_err(se)?;
+        // A3: per-night rate column for existing mirrors (guarded, idempotent)
+        let user_version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .map_err(se)?;
+        if user_version < 2 {
+            conn.execute_batch(include_str!("../desktop-migrations/0002_rate_columns.sql"))
+                .map_err(se)?;
+            conn.pragma_update(None, "user_version", 2).map_err(se)?;
+        }
         Ok(Self { conn })
     }
 
@@ -44,9 +57,7 @@ impl LocalStore {
     #[allow(dead_code)] // consumed by #[cfg(test)] and the next integration step
     pub fn with_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory().map_err(se)?;
-        conn.execute_batch(include_str!("../desktop-migrations/0001_init.sql"))
-            .map_err(se)?;
-        Ok(Self { conn })
+        Self::init_connection(conn)
     }
 
     // ---- offline login cache (kv-backed, DPAPI-protected sensitive fields)
@@ -442,15 +453,16 @@ impl SyncStore for LocalStore {
                     .execute(
                         "INSERT INTO reservations
                            (id, room_id, channel_id, guest_id, checkin_date, checkout_date,
-                            status, total_price_cents, adults, children)
-                         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+                            status, total_price_cents, adults, children, daily_rates)
+                         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
                          ON CONFLICT (id) DO UPDATE SET
                            room_id = excluded.room_id, channel_id = excluded.channel_id,
                            guest_id = excluded.guest_id, checkin_date = excluded.checkin_date,
                            checkout_date = excluded.checkout_date,
                            status = excluded.status,
                            total_price_cents = excluded.total_price_cents,
-                           adults = excluded.adults, children = excluded.children, deleted_at = NULL",
+                           adults = excluded.adults, children = excluded.children,
+                           daily_rates = excluded.daily_rates, deleted_at = NULL",
                         params![
                             eid,
                             payload["room_id"].as_str().unwrap_or(""),
@@ -462,6 +474,10 @@ impl SyncStore for LocalStore {
                             payload["total_price_cents"].as_i64().unwrap_or(0),
                             payload["adults"].as_i64().unwrap_or(1).max(0),
                             payload["children"].as_i64().unwrap_or(0).max(0),
+                            match payload.get("daily_rates") {
+                                Some(v) if !v.is_null() => serde_json::to_string(v).ok(),
+                                _ => None,
+                            },
                         ],
                     )
                     .map_err(se)?;
@@ -564,7 +580,9 @@ impl SyncStore for LocalStore {
                             payload["payment_type"].as_str().unwrap_or("cash"),
                             payload["reference"].as_str(),
                             (payload["amount_cents"].as_i64().unwrap_or(0) < 0) as i64,
-                            now,
+                            // A3: real payment day = the record's server timestamp,
+                            // never the sync-apply moment
+                            record.server_timestamp.timestamp_millis(),
                         ],
                     )
                     .map_err(se)?;
