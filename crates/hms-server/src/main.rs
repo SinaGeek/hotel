@@ -3,8 +3,10 @@ mod auth;
 mod bootstrap;
 mod db;
 mod metrics;
+mod openapi;
 mod rate_limiter;
 
+use axum::response::IntoResponse;
 use axum::{routing::get, Json, Router};
 use hms_core::ApiResponse;
 use sqlx::postgres::PgPoolOptions;
@@ -103,6 +105,8 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/metrics", get(metrics::endpoint))
+        // F2: machine-readable contract generated from the server's own DTOs
+        .route("/api/v1/openapi.json", get(openapi_json))
         .nest("/api/v1/auth", auth::router())
         .nest(
             "/api/v1",
@@ -123,8 +127,17 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-fn session_secret_for(configured: Option<&str>, production: bool) -> Result<String, String> {
-    match configured.filter(|v| !v.trim().is_empty()) {
+/// `GET /api/v1/openapi.json` (F2): the OpenAPI 3 document built from the
+/// server's own DTO definitions. No authentication: it describes the contract
+/// and is useful to tooling; it exposes no tenant data.
+async fn openapi_json() -> impl IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        openapi::document().to_string(),
+    )
+}
+
+fn session_secret_for(configured: Option<&str>, production: bool) -> Result<String, String> {    match configured.filter(|v| !v.trim().is_empty()) {
         Some(secret) if secret.as_bytes().len() >= 32 => Ok(secret.to_owned()),
         Some(_) => Err("SESSION_SECRET must be at least 32 bytes".to_owned()),
         None if production => Err("SESSION_SECRET must be set in production".to_owned()),

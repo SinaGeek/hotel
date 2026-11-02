@@ -41,3 +41,6 @@ apps/desktop/src-tauri/gen/
 
 # local run logs
 *.log
+
+# generated OpenAPI bundle (F2): regenerate with pnpm gen:api
+/apps/web/src/types/generated/openapi.json
