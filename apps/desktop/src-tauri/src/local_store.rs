@@ -25,10 +25,13 @@ fn se(e: rusqlite::Error) -> StoreError {
 }
 
 impl LocalStore {
-    /// Open (creating/tracking the schema as needed). On Windows the session
-    /// token + offline cache are stored DPAPI-protected inside `kv`.
+    /// Open (creating/tracking the schema as needed). The database is
+    /// SQLCipher-encrypted (todo C2/C3): the key is DPAPI-protected beside it
+    /// and an existing plaintext install is migrated on first open. On Windows
+    /// the session token + offline cache are stored DPAPI-protected inside `kv`.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
-        let conn = Connection::open(path).map_err(se)?;
+        let key = crate::sqlcipher::load_or_create_key(path).map_err(StoreError::Io)?;
+        let conn = crate::sqlcipher::open_encrypted(path, &key).map_err(StoreError::Io)?;
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(se)?;
         conn.pragma_update(None, "synchronous", "NORMAL")
@@ -54,10 +57,32 @@ impl LocalStore {
     // -- read surface used by the tests and the upcoming local-first UI wiring
     // (per-page reads land with the web/desktop integration step)
 
-    #[allow(dead_code)] // consumed by #[cfg(test)] and the next integration step
+    #[cfg(test)]
     pub fn with_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory().map_err(se)?;
+        let _ = conn.pragma_update(None, "cipher_memory_security", "ON");
         Self::init_connection(conn)
+    }
+
+    /// Test-only: drop every mirror row so a test starts from a known state
+    /// on an on-disk (encrypted) database.
+    #[cfg(test)]
+    pub fn kill_all_tables_for_test(&mut self) {
+        for t in [
+            "applied_ops",
+            "outbox",
+            "failures",
+            "guests",
+            "room_types",
+            "rooms",
+            "channels",
+            "price_rules",
+            "reservations",
+            "payments",
+            "folio_transactions",
+        ] {
+            let _ = self.conn.execute(&format!("DELETE FROM {t}"), []);
+        }
     }
 
     // ---- offline login cache (kv-backed, DPAPI-protected sensitive fields)

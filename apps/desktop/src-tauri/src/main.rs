@@ -12,6 +12,7 @@
 mod dpapi;
 mod local_first;
 mod local_store;
+mod sqlcipher;
 mod offline;
 mod reports;
 

@@ -12,15 +12,15 @@ This document records how schema changes are applied today. It is a development/
 
 ## Desktop SQLite mirror schema
 
-- Current schema file: `apps/desktop/src-tauri/desktop-migrations/0001_init.sql`.
-- Invocation: `LocalStore::open` enables WAL/NORMAL and executes that SQL on each open. The DDL uses `CREATE TABLE IF NOT EXISTS`; there is currently no SQLite migration-version ledger or ordered migration runner.
-- Adding a new column/index/table is not automatically upgraded for existing installations unless the DDL is explicitly migration-safe. Do not ship a breaking SQLite schema edit until a versioned migration ledger and upgrade tests are added.
-- The mirror is a single-hotel operational cache, not a backup. On hotel switch, mirror data and sync bookkeeping are cleared to prevent tenant mixing. Auth token/offline login cache are DPAPI-protected in `kv`; other mirror data is not SQLCipher-encrypted.
-- Before a desktop upgrade, close HMS Desktop and preserve a copy of `%APPDATA%/com.hms.desktop/hms.sqlite` (including `-wal` and `-shm` files if present). This is a recovery copy only, not a substitute for server backups.
+- Current schema files: `apps/desktop/src-tauri/desktop-migrations/0001_init.sql` (base) and `0002_rate_columns.sql` (A3 per-night rates).
+- Invocation: `LocalStore::open` opens the mirror through `sqlcipher::open_encrypted`, which (a) reads/creates the DPAPI-protected 32-byte key beside the DB (`hms.key`) and (b) migrates a plaintext file to SQLCipher in place via `sqlcipher_export()` on first open of an existing plain install. Then WAL/NORMAL are set, `PRAGMA cipher_memory_security = ON` is applied, and the embedded DDL runs.
+- Versioning: the DDL uses `CREATE TABLE IF NOT EXISTS`; ordered upgrades are guarded by `PRAGMA user_version` (0002 requires version >= 2). Add a new numbered file plus a user_version bump for each migration-safe change; do not ship a breaking edit without a ledger entry and an upgrade test.
+- The mirror is a single-hotel operational cache, not a backup. On hotel switch, mirror data and sync bookkeeping are cleared to prevent tenant mixing. Auth token/offline login cache are DPAPI-protected in `kv`; the entire database file is SQLCipher-encrypted, so a plain `sqlite3` open fails with "file is not a database".
+- Before a desktop upgrade, close HMS Desktop and preserve a copy of `%APPDATA%/com.hms.desktop/hms.sqlite` **and** `hms.key` (the DPAPI key blob). Both are needed together; without `hms.key` the DB is unreadable by design.
+- SQLCipher build prerequisites (MSVC C++ tools, Strawberry Perl, NASM) and the `scripts/build-desktop.ps1` wrapper are documented in `docs/desktop-build.md`.
 
 ## Remaining operational work
 
-- Implement SQLite migration versioning before the next incompatible mirror schema change.
 - Add and rehearse PostgreSQL backup/restore and replication procedures.
 - Define a production release order and tested rollback strategy for server migrations and desktop updates.
-- SQLCipher and Tauri auto-updater remain separately tracked blockers in `final_product_remains.md`.
+- Tauri auto-updater remains a separately tracked blocker in `final_product_remains.md`.

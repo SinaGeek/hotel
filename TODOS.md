@@ -51,10 +51,14 @@ This is the main missing piece of the product vision.
 
 ## P0-C. SQLCipher-encrypted local database
 
-- [ ] **C1.** Install Windows build prerequisites (MSVC C++ tools, Strawberry Perl, NASM). Document in `docs/desktop-build.md`.
-- [ ] **C2.** Switch `rusqlite` to `bundled-sqlcipher-vendored-openssl`. Generate a random 32-byte key per install, store it DPAPI-protected, issue `PRAGMA key` before any statement, enable `cipher_memory_security`.
-- [ ] **C3.** Migration for existing plaintext installs using `sqlcipher_export()` into a new encrypted file, then swap; keep the outbox intact.
-- [ ] **C4.** Test: opening `hms.sqlite` with plain `sqlite3` fails ("file is not a database"); app still starts, syncs and renders offline reports.
+- [x] **C1.** Install Windows build prerequisites (MSVC C++ tools, Strawberry Perl, NASM). Document in `docs/desktop-build.md`.
+  - Done: MSVC v18 BuildTools (`cl.exe` 19.51), portable Strawberry Perl 5.42.3.1 (`%LOCALAPPDATA%\Tools\perl`) and NASM 2.16.03 (`%LOCALAPPDATA%\Tools\nasm-2.16.03`), both on the user PATH. `scripts/build-desktop.ps1` wraps `vcvars64.bat` + PATH so OpenSSL builds without a manual shell setup. Documented in `docs/desktop-build.md`.
+- [x] **C2.** Switch `rusqlite` to `bundled-sqlcipher-vendored-openssl`. Generate a random 32-byte key per install, store it DPAPI-protected, issue `PRAGMA key` before any statement, enable `cipher_memory_security`.
+  - Done: `Cargo.toml` uses `bundled-sqlcipher-vendored-openssl` (OpenSSL built from source, verified: 13 min clean build). `sqlcipher.rs` generates 32 random bytes on first run, stores them DPAPI-protected in `hms.key` beside the DB, issues `PRAGMA key = "x'..'"` immediately (`apply_key`), verifies the key with a probe query before use, and sets `cipher_memory_security = ON`. `LocalStore::open` (the app's single DB entry point, also used by the sync worker and every Tauri command) goes through it.
+- [x] **C3.** Migration for existing plaintext installs using `sqlcipher_export()` into a new encrypted file, then swap; keep the outbox intact.
+  - Done: `sqlcipher::migrate_plaintext` detects a plaintext header, runs `ATTACH ... KEY` + `sqlcipher_export()`, verifies the new file opens with the key, parks the plaintext file, swaps the encrypted file in, then deletes the plaintext copy (and its `-wal`/`-shm`). The outbox lives in the same database, so it moves with it.
+- [x] **C4.** Test: opening `hms.sqlite` with plain `sqlite3` fails ("file is not a database"); app still starts, syncs and renders offline reports.
+  - Done and verified: `sqlcipher::tests::c4_plain_sqlite3_cannot_open_the_mirror` drives the real `LocalStore::open`, then runs a stock `sqlite3.exe` (set `HMS_SQLITE3_EXE`) and asserts it fails with a "not a database" style error. Manual confirmation on a produced mirror: header `50 d2 12 27 …` (not `SQLite format 3`), stock `sqlite3` exits 26 with `Error: in prepare, file is not a database (26)`, while the app re-opens and reads its rows. Companion tests `c2_*` / `c3_*` cover plain-reader rejection and the plaintext→encrypted migration with the outbox intact (20/20 desktop tests green).
 
 ## P0-D. Self-updating desktop app
 
