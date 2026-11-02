@@ -370,34 +370,48 @@ async fn main() {
         db_path: db_path.clone(),
     };
 
-    // background worker: one engine cycle per interval once a token exists
+    // background worker (todo A5 automatic sync triggers): one engine cycle
+    // per interval once a token exists, firing immediately at app start;
+    // while offline it re-polls fast (2 s, the practical network-up event —
+    // a restore of connectivity is picked up within this window), and on the
+    // first success the cadence returns to the configured interval. Push
+    // retries additionally honor the engine's per-op exponential backoff;
+    // outbox order is FIFO by enqueued time and ops are never dropped.
     {
         let tx = state.sync_sender.clone();
         let tok = state.token.clone();
         let base = api_base.clone();
         let db = db_path.clone();
         tokio::spawn(async move {
-            let mut timer = tokio::time::interval(interval);
+            // 0 delay = attempt right away (app-start trigger)
+            let mut delay_secs: u64 = 0;
             loop {
-                timer.tick().await;
+                tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
                 if (*tok.read().await).is_none() {
+                    delay_secs = interval.as_secs();
                     continue;
                 }
                 match run_cycle(base.clone(), tok.clone(), db.clone()).await {
                     Ok(_) => {
+                        delay_secs = interval.as_secs();
                         if let Ok(msg) = summarize(&db, None) {
                             let _ = tx.send(msg);
                         }
                     }
                     Err(SyncFailure::AccountLocked(_)) => {
                         // deactivated user: wipe the offline cache now
+                        delay_secs = interval.as_secs();
                         if let Ok(mut store) = LocalStore::open(&db) {
                             let _ = store.drop_offline_cache();
                         }
                         let _ = tx.send(SyncState::Locked);
                     }
-                    Err(e) => {
-                        if let Ok(msg) = summarize(&db, Some(e.to_string())) {
+                    Err(_) => {
+                        // offline / store error: poll fast so a restored
+                        // network triggers a cycle within ~2 s (per-op
+                        // exponential backoff still gates pushes)
+                        delay_secs = 2;
+                        if let Ok(msg) = summarize(&db, Some("offline; retrying".into())) {
                             let _ = tx.send(msg);
                         }
                     }
