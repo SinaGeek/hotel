@@ -49,10 +49,12 @@ pub async fn track(req: Request, next: Next) -> Response {
 
     REQUESTS.fetch_add(1, Ordering::Relaxed);
     LATENCY_SUM_MICROS.fetch_add(elapsed_micros, Ordering::Relaxed);
-    for (i, upper) in BUCKET_MS.iter().enumerate() {
-        if elapsed_ms <= *upper {
-            LATENCY[i].fetch_add(1, Ordering::Relaxed);
-        }
+    // Cumulative histogram: a sample increments ONLY the first bucket whose
+    // bound it fits (le is "less than or equal"), and the exposition sums
+    // forward. Incrementing every larger bucket would make le="0.005" claim
+    // almost all traffic and render p95 alerts useless.
+    if let Some(i) = BUCKET_MS.iter().position(|upper| elapsed_ms <= *upper) {
+        LATENCY[i].fetch_add(1, Ordering::Relaxed);
     }
     if response.status().is_server_error() {
         SERVER_ERRORS.fetch_add(1, Ordering::Relaxed);
@@ -89,12 +91,16 @@ pub async fn endpoint(State(state): State<AppState>) -> impl IntoResponse {
         "# HELP hms_http_request_duration_seconds Request latency\n# TYPE hms_http_request_duration_seconds histogram\n",
     );
     for (i, upper) in BUCKET_MS.iter().enumerate() {
-        let count = LATENCY[i].load(Ordering::Relaxed);
+        // Prometheus cumulative buckets: le="x" counts samples <= x, so this
+        // bucket is the sum of every smaller-or-equal bucket (indices 0..=i).
+        let count: u64 = LATENCY[..=i].iter().map(|a| a.load(Ordering::Relaxed)).sum();
         out.push_str(&format!(
             "hms_http_request_duration_seconds_bucket{{le=\"{:.3}\"}} {count}\n",
             *upper as f64 / 1_000.0
         ));
     }
+    // +Inf always equals the total number of samples, including those slower
+    // than the largest finite bound.
     out.push_str(&format!(
         "hms_http_request_duration_seconds_bucket{{le=\"+Inf\"}} {requests}\n\
          hms_http_request_duration_seconds_sum {sum_seconds}\n\
@@ -123,5 +129,40 @@ mod tests {
         for pair in BUCKET_MS.windows(2) {
             assert!(pair[0] < pair[1]);
         }
+    }
+
+    /// Regression (found while verifying E4 against a live scrape): a slow
+    /// request must NOT be counted in the fast buckets. Mirrors `track`'s
+    /// accounting and the exposition's cumulative sum.
+    #[test]
+    fn e4_slow_requests_are_not_counted_in_fast_buckets() {
+        // isolated counters: 3 fast samples (2 ms) and 1 slow sample (300 ms)
+        let mut raw = [0u64; 11];
+        for elapsed_ms in [2u64, 2, 2, 300] {
+            if let Some(i) = BUCKET_MS.iter().position(|upper| elapsed_ms <= *upper) {
+                raw[i] += 1;
+            }
+        }
+        // cumulative for bucket `i` = every sample that fits in bound i or an
+        // earlier (smaller) one: raw[..=i], NOT raw[i..]
+        let cumulative = |idx: usize| -> u64 { raw[..=idx].iter().sum() };
+
+        // le=0.005 sees exactly the three 2 ms samples
+        assert_eq!(cumulative(0), 3, "fast bucket must not absorb the slow sample");
+        // BUCKET_MS[1..=5] are 10/25/50/100/200 ms — all below 300 ms, so the
+        // slow sample is still excluded there
+        for idx in 1..=5 {
+            assert_eq!(
+                cumulative(idx),
+                3,
+                "BUCKET_MS[{idx}] = {} ms must exclude the 300 ms sample",
+                BUCKET_MS[idx]
+            );
+        }
+        // BUCKET_MS[6] = 500 ms is the first bound that includes it
+        assert_eq!(cumulative(6), 4);
+        assert_eq!(cumulative(10), 4, "every finite bound up to 10 s includes it");
+        // the sequence is non-decreasing, as Prometheus requires
+        assert!((0..11).map(cumulative).collect::<Vec<_>>().windows(2).all(|w| w[0] <= w[1]));
     }
 }

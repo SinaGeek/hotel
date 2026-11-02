@@ -1,5 +1,6 @@
 # Keep the Docker build context small and free of local secrets/artifacts.
 .git
+.github
 target
 **/target
 node_modules
@@ -16,3 +17,10 @@ postgresql-*.exe
 release
 docs/screenshots
 *.msi
+# never ship signing material or local databases into an image build
+*.key
+*.key.pub
+hms.sqlite
+hms.sqlite-*
+hms.key
+artifacts

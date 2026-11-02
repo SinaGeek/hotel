@@ -67,23 +67,21 @@ async fn add_folio(
     }
     let mut conn = state.db.begin().await.map_err(ApiError::from)?;
     db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
-    let res_room: (Uuid, Uuid) = sqlx::query_as("SELECT room_id, channel_id FROM reservations WHERE id = $1 AND hotel_id = $2 AND deleted_at IS NULL")
+    // one lookup: room/channel for revenue attribution + the stay span for the
+    // per-even-night extra-revenue spread (A3, matches the desktop mirror)
+    let (res_room, res_stay): ((Uuid, Uuid), (chrono::NaiveDate, chrono::NaiveDate)) = {
+        let row: (Uuid, Uuid, chrono::NaiveDate, chrono::NaiveDate) = sqlx::query_as(
+            "SELECT room_id, channel_id, checkin_date, checkout_date
+               FROM reservations WHERE id = $1 AND hotel_id = $2 AND deleted_at IS NULL",
+        )
         .bind(id)
         .bind(auth.hotel_id)
         .fetch_one(&mut *conn)
         .await
         .map_err(|_| ApiError(StatusCode::NOT_FOUND, "reservation not found".into()))?;
+        ((row.0, row.1), (row.2, row.3))
+    };
     let total = body.unit_price_cents * (body.quantity as i64).max(1);
-    // including the nights for the per-even-night spread (A3: extras accrue
-    // over the stay like the desktop mirror does, dust on the first night)
-    let res_stay: (chrono::NaiveDate, chrono::NaiveDate) = sqlx::query_as(
-        "SELECT checkin_date, checkout_date FROM reservations WHERE id = $1 AND hotel_id = $2 AND deleted_at IS NULL",
-    )
-    .bind(id)
-    .bind(auth.hotel_id)
-    .fetch_one(&mut *conn)
-    .await
-    .map_err(|_| ApiError(StatusCode::NOT_FOUND, "reservation not found".into()))?;
 
     let fid = Uuid::now_v7();
     let op_id = Uuid::now_v7();
@@ -107,12 +105,6 @@ async fn add_folio(
 
     // extra revenue spreads OVER the stay nights (README §10): even split,
     // rounding dust lands on the first night — identical to the desktop report
-    let res_room: (Uuid, Uuid) = sqlx::query_as("SELECT room_id, channel_id FROM reservations WHERE id = $1 AND hotel_id = $2 AND deleted_at IS NULL")
-        .bind(id)
-        .bind(auth.hotel_id)
-        .fetch_one(&mut *conn)
-        .await
-        .map_err(|_| ApiError(StatusCode::NOT_FOUND, "reservation not found".into()))?;
     let nights = (res_stay.1 - res_stay.0).num_days().max(1);
     sqlx::query(
         r#"UPDATE daily_revenue dr
