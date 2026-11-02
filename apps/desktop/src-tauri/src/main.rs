@@ -202,7 +202,7 @@ async fn local_write(
         ),
         None => None,
     };
-    let op = local_first::stage_local_write(&mut store, hotel_id, e, o, eid, payload)?;
+    let (op, warning) = local_first::stage_local_write(&mut store, hotel_id, e, o, eid, payload)?;
     let oid = op.operation_id;
     let id_s = op.entity_id.to_string();
 
@@ -232,6 +232,7 @@ async fn local_write(
             return Ok(serde_json::to_value(local_first::WriteOutcome::Confirmed {
                 operation_id: oid.to_string(),
                 entity_id: id_s,
+                warning,
             })
             .expect("serializable"));
         }
@@ -239,6 +240,7 @@ async fn local_write(
     Ok(serde_json::to_value(local_first::WriteOutcome::Queued {
         operation_id: oid.to_string(),
         entity_id: id_s,
+        warning,
         reason: cycle_error
             .unwrap_or_else(|| "offline or no session; stored locally and queued".into()),
     })

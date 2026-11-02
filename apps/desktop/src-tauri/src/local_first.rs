@@ -29,12 +29,18 @@ pub enum WriteOutcome {
     Confirmed {
         operation_id: String,
         entity_id: String,
+        /// A4: local availability warning (offline "looks taken" estimate)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        warning: Option<String>,
     },
     /// The write lives in SQLite + outbox and will reach the server with the
     /// next successful sync cycle (never lost, never recreated client-side).
     Queued {
         operation_id: String,
         entity_id: String,
+        /// A4: local availability warning (offline "looks taken" estimate)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        warning: Option<String>,
         reason: String,
     },
 }
@@ -265,10 +271,46 @@ fn normalize(
     Ok(payload)
 }
 
+/// A4 (README §2.3): offline availability check — WARN, never block.
+/// Overlapping stays on the same room in the local mirror count as "looks
+/// taken locally"; the booking is always allowed (overbooking is accepted;
+/// the server's EXCLUDE resolves it to status `conflict`).
+fn local_overlap_warning(
+    store: &mut LocalStore,
+    room_id: Uuid,
+    checkin: &str,
+    checkout: &str,
+    exclude: Option<Uuid>,
+) -> Option<String> {
+    let conn = store.conn_for_local_writes();
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM reservations
+              WHERE room_id = ?1 AND id <> ?2 AND deleted_at IS NULL
+                AND status NOT IN ('cancelled','conflict')
+                AND checkin_date < ?3 AND checkout_date > ?4",
+            params![
+                room_id.to_string(),
+                exclude.map(|e| e.to_string()).unwrap_or_default(),
+                checkout,
+                checkin,
+            ],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    (n > 0).then(|| {
+        format!(
+            "room {room_id} looks taken locally for {checkin}..{checkout} (offline estimate; \
+             the booking was queued and the server will decide)"
+        )
+    })
+}
+
 /// Validate and stage one local write: the optimistic mirror row and the
 /// outbox entry are committed in the SAME SQLite transaction (todo A1). The
 /// webview may pass `null` `entity_id`; new entities get a client-generated
-/// UUIDv7 which the server adopts verbatim on push.
+/// UUIDv7 which the server adopts verbatim on push. Returns the staged op and
+/// an A4 availability warning for reservation writes (None = no local clash).
 pub fn stage_local_write(
     store: &mut LocalStore,
     hotel_id: i64,
@@ -276,7 +318,7 @@ pub fn stage_local_write(
     operation: OperationType,
     entity_id: Option<Uuid>,
     payload: serde_json::Value,
-) -> Result<ChangeOperation, String> {
+) -> Result<(ChangeOperation, Option<String>), String> {
     if hotel_id == 0 {
         return err("no hotel logged in on this device");
     }
@@ -285,6 +327,37 @@ pub fn stage_local_write(
         (Some(id), _) => id,
         (None, OperationType::Insert) => Uuid::now_v7(),
         (None, _) => return err("entity_id is required for edits"),
+    };
+    // A4: pure warning, computed before staging so even a full-ranged edit
+    // can warn; reads on a fresh mirror are cheap
+    let warning = if entity == EntityType::Reservation {
+        match operation {
+            OperationType::Insert | OperationType::Update => {
+                let room_id = match payload.get("room_id").and_then(|v| v.as_str()) {
+                    Some(s) => match s.parse::<Uuid>() {
+                        Ok(u) => Some(u),
+                        Err(_) => return err("payload field 'room_id' must be a UUID"),
+                    },
+                    // edit keeping the current room: no local availability
+                    // warning (the mirror row's room is unchanged)
+                    None => None,
+                };
+                match room_id {
+                    Some(u) => {
+                        let checkin = payload["checkin_date"].as_str().unwrap_or("").to_owned();
+                        let checkout = payload["checkout_date"].as_str().unwrap_or("").to_owned();
+                        if checkin.is_empty() || checkout.is_empty() {
+                            return err("checkin_date/checkout_date are required");
+                        }
+                        local_overlap_warning(store, u, &checkin, &checkout, Some(entity_id))
+                    }
+                    None => None,
+                }
+            }
+            OperationType::Delete => None,
+        }
+    } else {
+        None
     };
     let op = ChangeOperation {
         operation_id: Uuid::now_v7(),
@@ -296,7 +369,7 @@ pub fn stage_local_write(
         client_timestamp: Utc::now(),
     };
     stage(store, &op)?;
-    Ok(op)
+    Ok((op, warning))
 }
 
 /// Commit mirror + outbox atomically.
@@ -605,7 +678,7 @@ mod tests {
         let mut s = store();
         let room = Uuid::now_v7();
         let ch = Uuid::now_v7();
-        let op = stage_local_write(
+        let (op, _a4) = stage_local_write(
             &mut s,
             4442,
             EntityType::Reservation,
@@ -637,7 +710,7 @@ mod tests {
         let mut s = store();
         let room = Uuid::now_v7();
         let ch = Uuid::now_v7();
-        let op = stage_local_write(
+        let (op, _a4) = stage_local_write(
             &mut s,
             4442,
             EntityType::Reservation,
@@ -701,6 +774,68 @@ mod tests {
         )
         .is_err());
         assert_eq!(s.pending_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn a4_offline_overlap_warns_but_does_not_block() {
+        let mut s = store();
+        let room = Uuid::now_v7();
+        let ch = Uuid::now_v7();
+        let (first, warning) = stage_local_write(
+            &mut s,
+            4442,
+            EntityType::Reservation,
+            OperationType::Insert,
+            None,
+            res_payload(&room.to_string(), &ch.to_string()),
+        )
+        .expect("first staging keeps mirror room_id");
+        assert!(
+            warning.is_none(),
+            "first booking on an empty mirror must not warn"
+        );
+
+        // a second overlapping booking on the same room: queued, with warning
+        let (second, warning) = stage_local_write(
+            &mut s,
+            4442,
+            EntityType::Reservation,
+            OperationType::Insert,
+            None,
+            res_payload(&room.to_string(), &ch.to_string()),
+        )
+        .expect("overbooking IS allowed offline (README §2.3)");
+        assert!(warning.is_some(), "overlap must warn");
+        assert!(op_is_still_pending(&mut s, second.operation_id).unwrap());
+
+        // a NON-overlapping booking (different dates, same room): no warning
+        let mut p = res_payload(&room.to_string(), &ch.to_string());
+        p["checkin_date"] = serde_json::json!("2026-03-10");
+        p["checkout_date"] = serde_json::json!("2026-03-12");
+        let (_, warning) = stage_local_write(
+            &mut s,
+            4442,
+            EntityType::Reservation,
+            OperationType::Insert,
+            None,
+            p,
+        )
+        .expect("non overlapping");
+        assert!(warning.is_none());
+
+        // A4 detail: the optimistic rows must keep room_id to compute the
+        // warning, mirror now holds THREE reservations and the server decides
+        assert_eq!(s.list_reservation_ids().unwrap().len(), 3);
+        let room_check: i64 = s
+            .conn_for_local_writes()
+            .query_row(
+                "SELECT COUNT(*) FROM reservations WHERE room_id = ?1",
+                params![room.to_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(room_check, 3, "first reservation must not lose its room_id");
+        let _ = first;
     }
 
     #[test]

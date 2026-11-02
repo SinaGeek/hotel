@@ -113,6 +113,9 @@ export interface WriteOutcome {
   entity_id: string
   /** present on queued: why the write is waiting for the next sync cycle */
   reason?: string
+  /** A4: local availability warning (offline "room looks taken" estimate);
+   * a warning never blocks — the server resolves overlaps/exclusions later. */
+  warning?: string
 }
 
 export interface PaymentMirror {
