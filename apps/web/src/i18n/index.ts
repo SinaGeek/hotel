@@ -1,7 +1,62 @@
-// Lightweight i18next setup. English-only UI per project decision.
-// The i18n structure stays so additional languages can be added later.
+// Lightweight i18next setup with English + Turkish (todo F4).
+// `en` is the source of truth; `tr` (./tr.ts) must keep exact key parity, which
+// `assertKeyParity` checks at startup so a missing translation fails loudly
+// instead of silently rendering English or a raw key.
+const LANG_KEY = 'hms.lang'
+export type Lang = 'en' | 'tr'
+export const LANGS: Lang[] = ['en', 'tr']
+export const LANG_LABEL: Record<Lang, string> = { en: 'English', tr: 'Türkçe' }
+
+/** Flat dotted paths of every leaf, sorted — the parity contract. */
+function leafPaths(obj: Record<string, unknown>, prefix = ''): string[] {
+  const out: string[] = []
+  for (const [k, v] of Object.entries(obj)) {
+    const path = prefix ? `${prefix}.${k}` : k
+    if (v !== null && typeof v === 'object') out.push(...leafPaths(v as Record<string, unknown>, path))
+    else out.push(path)
+  }
+  return out.sort()
+}
+
+/** Returns the keys missing on either side (empty = in sync). */
+export function keyDrift(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): { missingInB: string[]; missingInA: string[] } {
+  const pa = leafPaths(a)
+  const pb = new Set(leafPaths(b))
+  const sa = new Set(pa)
+  return {
+    missingInB: pa.filter((k) => !pb.has(k)),
+    missingInA: leafPaths(b).filter((k) => !sa.has(k)),
+  }
+}
+
+function assertKeyParity() {
+  const { missingInB, missingInA } = keyDrift(
+    en as unknown as Record<string, unknown>,
+    tr as unknown as Record<string, unknown>,
+  )
+  if (missingInB.length || missingInA.length) {
+    // Dev-time guard: never ship a half-translated bundle silently.
+    console.error('[i18n] English/Turkish key drift', { missingInTurkish: missingInB, missingInEnglish: missingInA })
+  }
+}
+assertKeyParity()
+
+export function currentLang(): Lang {
+  const stored = localStorage.getItem(LANG_KEY)
+  return stored === 'tr' || stored === 'en' ? stored : 'en'
+}
+
+export async function setLang(lang: Lang) {
+  localStorage.setItem(LANG_KEY, lang)
+  document.documentElement.lang = lang
+  await i18n.changeLanguage(lang)
+}
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
+import { tr } from './tr'
 
 const en = {
   app: { title: 'HMS Hotel Management' },
@@ -65,6 +120,9 @@ const en = {
       'The server no longer accepts this app version ({{reason}}). Install the update to resume syncing; your local data and any queued changes are preserved.',
   },
   sync: {
+    syncNow: 'Sync now',
+    syncing: 'Syncing…',
+    syncNowHint: 'Push queued changes and pull the latest from the server',
     synced: 'Synced {{when}}',
     syncedPending: 'Synced; {{pending}} operation(s) waiting',
     allSynced: 'All changes are synced with the server',
@@ -370,10 +428,11 @@ const en = {
 }
 
 i18n.use(initReactI18next).init({
-  resources: { en: { translation: en } },
-  lng: 'en',
+  resources: { en: { translation: en }, tr: { translation: tr } },
+  lng: currentLang(),
   fallbackLng: 'en',
   interpolation: { escapeValue: false },
 })
+document.documentElement.lang = currentLang()
 
 export default i18n

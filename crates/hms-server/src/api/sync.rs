@@ -854,7 +854,7 @@ async fn apply_payment(
 
     // daily_revenue: collected money tracked on the payment day (README §10)
     // — same shape as the online record-payment path
-    let day = chrono::Utc::now().date_naive();
+    let day = super::reservations::hotel_today(conn, auth.hotel_id).await;
     sqlx::query(
         r#"INSERT INTO daily_revenue (hotel_id, date, room_id, room_type_id, channel_id, payment_collected_cents, occupied)
            VALUES ($1, $2, $3, (SELECT room_type_id FROM rooms WHERE id = $3), $4,

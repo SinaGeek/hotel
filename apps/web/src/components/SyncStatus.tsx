@@ -5,7 +5,7 @@
 // signs the user out when a sync handed back AccountLocked (deactivated
 // user; the offline verifier was already wiped by the worker). Renders
 // NOTHING in a plain browser — REST sampling keeps working.
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { desktop, isDesktop, type SyncSnapshot } from '../api/desktop'
@@ -26,19 +26,37 @@ export function SyncStatusPill() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [status, setStatus] = useState<SyncSnapshot | null>(null)
+  const [syncing, setSyncing] = useState(false)
+
+  const tick = useCallback(async () => {
+    try {
+      setStatus(await desktop.syncStatus())
+    } catch {
+      setStatus({ state: 'Unknown' })
+    }
+  }, [])
+
+  /** F6: manual "Sync now" — fires one cycle, then refreshes the pill. */
+  const syncNow = useCallback(async () => {
+    setSyncing(true)
+    try {
+      await desktop.syncNow()
+    } catch {
+      /* the pill reports the outcome of the cycle itself */
+    } finally {
+      await tick()
+      setSyncing(false)
+    }
+  }, [tick])
 
   useEffect(() => {
     if (!isDesktop) return
     let alive = true
-    const tick = () => {
-      desktop.syncStatus().then((s) => { if (alive) setStatus(s) }).catch(() => {
-        if (alive) setStatus({ state: 'Unknown' })
-      })
-    }
-    tick()
-    const iv = setInterval(tick, REFRESH_MS)
+    const run = () => { if (alive) void tick() }
+    run()
+    const iv = setInterval(run, REFRESH_MS)
     return () => { alive = false; clearInterval(iv) }
-  }, [])
+  }, [tick])
 
   // Locked = the sync cycle brought back an inactive/deactivated account
   // (README §11.7): the offline verifier is already wiped; drop the REST
@@ -92,6 +110,26 @@ export function SyncStatusPill() {
     <div className="sync-pill" title={title} data-state={status.state.toLowerCase()}>
       <span className="sync-dot" style={{ background: dot }} />
       <span className="sync-text">{text}</span>
+      <button
+        type="button"
+        className="ghost"
+        onClick={() => { void syncNow() }}
+        disabled={syncing}
+        title={t('sync.syncNowHint')}
+        style={{
+          marginLeft: 6,
+          fontSize: 11,
+          padding: '1px 7px',
+          borderRadius: 8,
+          border: '1px solid currentColor',
+          background: 'transparent',
+          color: 'inherit',
+          cursor: syncing ? 'default' : 'pointer',
+          opacity: syncing ? 0.6 : 1,
+        }}
+      >
+        {syncing ? t('sync.syncing') : t('sync.syncNow')}
+      </button>
     </div>
   )
 }

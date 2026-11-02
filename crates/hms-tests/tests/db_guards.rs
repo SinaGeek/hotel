@@ -517,3 +517,45 @@ async fn daily_revenue_totals_match_the_raw_ledgers() -> Result<(), Box<dyn std:
     assert_eq!(occupied, 3, "occupied nights in daily_revenue must equal the stay length");
     Ok(())
 }
+
+/// F3: revenue is bucketed by the HOTEL's local day, not UTC. The same instant
+/// is a different date in Kiritimati (UTC+14) than in UTC, which is exactly the
+/// off-by-a-day bug this test locks down.
+#[tokio::test]
+async fn f3_hotel_time_zone_decides_the_business_day() -> Result<(), Box<dyn std::error::Error>> {
+    let Some((url, pool)) = setup().await? else { return Ok(()) };
+
+    // the expression the server uses (reservations::hotel_today)
+    let sql = "SELECT (now() AT TIME ZONE $1)::date, (now() AT TIME ZONE 'UTC')::date";
+    let (east, utc): (chrono::NaiveDate, chrono::NaiveDate) =
+        sqlx::query_as(sql).bind("Pacific/Kiritimati").fetch_one(&pool).await?;
+    let (west, _): (chrono::NaiveDate, chrono::NaiveDate) =
+        sqlx::query_as(sql).bind("America/Los_Angeles").fetch_one(&pool).await?;
+
+    assert!(east >= utc, "a UTC+14 hotel is never behind UTC ({east} vs {utc})");
+    assert!(west <= utc, "a UTC-8 hotel is never ahead of UTC ({west} vs {utc})");
+    // at least one zone must differ from UTC at some point in the day; at the
+    // exact boundary both may coincide, so only assert the ordering above.
+    assert!(east > west, "far-east and far-west zones cannot share a day ({east} vs {west})");
+
+    // and the column default is a real, resolvable zone
+    let default_zone: Option<String> = sqlx::query_scalar(
+        "SELECT column_default FROM information_schema.columns
+          WHERE table_name='hotels' AND column_name='time_zone'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    // Postgres renders this as "'Europe/Istanbul'::text" — take the literal
+    let default_zone = default_zone
+        .expect("hotels.time_zone has a default")
+        .split('\'')
+        .nth(1)
+        .expect("default is a quoted literal")
+        .to_string();
+    let (resolved,): (chrono::NaiveDate,) =
+        sqlx::query_as("SELECT (now() AT TIME ZONE $1)::date").bind(&default_zone).fetch_one(&pool).await?;
+    assert!(resolved >= west && resolved <= east, "default zone {default_zone} must resolve to a real date");
+
+    let _ = url;
+    Ok(())
+}

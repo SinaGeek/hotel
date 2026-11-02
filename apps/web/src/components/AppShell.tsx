@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '../api/auth'
 import { api, sessionHasPermission } from '../api/client'
 import { desktop, isDesktop } from '../api/desktop'
+import { LANG_LABEL, currentLang, setLang, type Lang } from '../i18n'
 import { SyncStatusPill } from './SyncStatus'
 import { UpdatePill } from './UpdatePill'
 import {
@@ -109,6 +110,12 @@ export function AppShell() {
   // theme toggle (light default, persisted)
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light')
+  // language toggle (F4): re-renders the whole tree through i18next
+  const [lang, setLangState] = useState<Lang>(() => currentLang())
+  const switchLang = (next: Lang) => {
+    setLangState(next)
+    void setLang(next)
+  }
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     localStorage.setItem(THEME_KEY, theme)
@@ -261,7 +268,15 @@ export function AppShell() {
             <SyncStatusPill />
             <UpdatePill />
             <button className="icon-btn" aria-label={t('shell.notifications')} title={t('shell.notifications')}><IconBell /></button>
-            <button className="icon-btn" aria-label={t('shell.language')} title={t('shell.language')}><IconGlobe /></button>
+            <button
+              className="icon-btn"
+              aria-label={t('shell.language')}
+              title={`${t('shell.language')}: ${LANG_LABEL[lang]}`}
+              onClick={() => switchLang(lang === 'en' ? 'tr' : 'en')}
+            >
+              <IconGlobe />
+              <span style={{ fontSize: 10, marginLeft: 2, fontWeight: 700 }}>{lang.toUpperCase()}</span>
+            </button>
             <button
               className="icon-btn"
               aria-label={theme === 'dark' ? t('shell.lightMode') : t('shell.darkMode')}

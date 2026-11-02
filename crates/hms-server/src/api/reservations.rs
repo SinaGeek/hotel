@@ -68,6 +68,25 @@ pub struct ListQuery {
 
 // ------------------------------------------------------------------------- helpers
 
+/// F3: the hotel's business day. Revenue is bucketed by the LOCAL date, not
+/// UTC — a sale at 00:30 in Istanbul (+03) must land on the new day, not the
+/// previous one. Falls back to UTC if the hotel's zone is unknown.
+pub(crate) async fn hotel_today(
+    conn: &mut sqlx::PgConnection,
+    hotel_id: i64,
+) -> chrono::NaiveDate {
+    sqlx::query_scalar(
+        "SELECT (now() AT TIME ZONE COALESCE(NULLIF(time_zone, ''), 'UTC'))::date
+           FROM hotels WHERE id = $1",
+    )
+    .bind(hotel_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| chrono::Utc::now().date_naive())
+}
+
 /// Canonical, mirror-shape echo for one reservation's change record (todo A2
 /// "server decides"): the payload the desktop `apply_remote` consumes to
 /// rebuild the local row exactly as the server has it — room/channel/guest
@@ -459,7 +478,7 @@ pub async fn create(
 }
 
 #[derive(Deserialize, Serialize)]
-struct EditReservationBody {
+pub(crate) struct EditReservationBody {
     room_id: Option<Uuid>,
     channel_id: Option<Uuid>,
     guest_id: Option<Uuid>,
@@ -953,7 +972,7 @@ async fn record_payment(
     let pid = Uuid::now_v7();
     let op_id = Uuid::now_v7();
     let currency = body.currency.clone().unwrap_or(res.currency.clone());
-    let day = chrono::Utc::now().date_naive();
+    let day = hotel_today(&mut conn, auth.hotel_id).await;
     sqlx::query(
         r#"INSERT INTO payments (id, hotel_id, reservation_id, amount_cents, currency, payment_type, reference, created_by)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)"#,
@@ -1026,7 +1045,7 @@ async fn reverse_payment(
     // Corrections = reversal entry + never edits (README §7)
     let rid = Uuid::now_v7();
     let op_id = Uuid::now_v7();
-    let day = chrono::Utc::now().date_naive();
+    let day = hotel_today(&mut conn, auth.hotel_id).await;
     sqlx::query(
         r#"INSERT INTO payments (id, hotel_id, reservation_id, amount_cents, currency, payment_type, reference, is_reversal, created_by)
            VALUES ($1,$2,$3, -$4, $5, 'refund', $6, TRUE, $7)"#,

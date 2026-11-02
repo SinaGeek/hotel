@@ -4,8 +4,6 @@
 use axum::http::StatusCode;
 use sqlx::PgConnection;
 
-pub type ApiResult<T> = Result<T, (StatusCode, String)>;
-
 pub fn api_err(status: StatusCode, message: impl Into<String>) -> (StatusCode, String) {
     (status, message.into())
 }
