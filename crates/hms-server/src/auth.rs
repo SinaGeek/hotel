@@ -66,10 +66,38 @@ impl FromRequestParts<AppState> for AuthUser {
             return Err(err(StatusCode::FORBIDDEN, "password change required before any other action"));
         }
 
+        // F7 — session revocation: a JWT is only a claim, the DATABASE is the
+        // authority. Re-read the live role/active flag so deactivating a user or
+        // demoting their role takes effect immediately instead of lingering for
+        // the token's remaining lifetime (up to SESSION_DAYS). One indexed
+        // primary-key lookup per request is cheap next to the work that follows.
+        let live: Option<(bool, String)> =
+            sqlx::query_as("SELECT is_active, role FROM users WHERE id = $1")
+                .bind(claims.claims.sub)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "session check failed"))?;
+        let (is_active, role) = match live {
+            Some(row) => row,
+            // deleted user: the token must stop working at once
+            None => return Err(err(StatusCode::UNAUTHORIZED, "session revoked")),
+        };
+        if !is_active {
+            return Err(err(StatusCode::UNAUTHORIZED, "session revoked: account disabled"));
+        }
+        // the role comes from the database, never from the (possibly stale) token
+        if role != claims.claims.role && role != "admin" {
+            tracing::info!(
+                user = %claims.claims.sub,
+                "session role changed {} -> {}; using the live role",
+                claims.claims.role, role
+            );
+        }
+
         Ok(AuthUser {
             user_id: claims.claims.sub,
             hotel_id: claims.claims.hotel_id,
-            role: claims.claims.role,
+            role,
             force_password_change: claims.claims.fpc,
         })
     }

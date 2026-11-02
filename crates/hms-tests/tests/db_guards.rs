@@ -56,11 +56,15 @@ struct Fixture {
 
 /// Unique-per-run tenants (tests never re-use hotel ids — no truncation needed).
 async fn fixture(pool: &PgPool) -> Result<Fixture, Box<dyn std::error::Error>> {
+    // Full epoch nanos in micros-of-a-day-like spread. `subsec_nanos` alone
+    // repeats every second, so back-to-back runs collided on hotels_pkey.
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .subsec_nanos() as i64;
-    let h1 = 1_100_000_000 + nanos % 500_000_000;
+        .as_nanos() as i64;
+    // 9e14 keeps (base + nanos) inside BIGINT while staying well clear of the
+    // seeded/bootstrapped hotels (0, 4442, 5001, loadtest 4443).
+    let h1 = 4_000_000_000_000 + (nanos % 4_000_000_000_000);
     let h2 = h1 + 1;
 
     let rt_a = Uuid::now_v7();
