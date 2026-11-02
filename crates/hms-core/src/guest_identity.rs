@@ -54,9 +54,9 @@ pub fn encrypt_guest_field_with_key(plaintext: &str, key: &[u8]) -> Result<Strin
     let cipher = XChaCha20Poly1305::new_from_slice(key).map_err(|e| e.to_string())?;
     let mut nonce_bytes = [0u8; NONCE_LEN];
     getrandom::getrandom(&mut nonce_bytes).map_err(|e| format!("nonce generation failed: {e}"))?;
-    let nonce = XNonce::from_slice(&nonce_bytes);
+    let nonce = XNonce::from(nonce_bytes);
     let ciphertext = cipher
-        .encrypt(nonce, plaintext.as_bytes())
+        .encrypt(&nonce, plaintext.as_bytes())
         .map_err(|e| format!("guest field encryption failed: {e}"))?;
     let mut out = nonce_bytes.to_vec();
     out.extend_from_slice(&ciphertext);
@@ -70,10 +70,13 @@ pub fn decrypt_guest_field_with_key(ciphertext: &str, key: &[u8]) -> Result<Stri
         return Err("ciphertext too short".to_string());
     }
     let (nonce_bytes, ct) = decoded.split_at(NONCE_LEN);
-    let nonce = XNonce::from_slice(nonce_bytes);
+    let nonce_bytes: [u8; NONCE_LEN] = nonce_bytes
+        .try_into()
+        .map_err(|_| "invalid nonce length".to_string())?;
+    let nonce = XNonce::from(nonce_bytes);
     let cipher = XChaCha20Poly1305::new_from_slice(key).map_err(|e| e.to_string())?;
     let plaintext = cipher
-        .decrypt(nonce, ct)
+        .decrypt(&nonce, ct)
         .map_err(|e| format!("guest field decryption failed: {e}"))?;
     String::from_utf8(plaintext).map_err(|e| format!("decrypted field is not valid UTF-8: {e}"))
 }

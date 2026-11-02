@@ -1,5 +1,5 @@
 //! Reservations: list/create/detail/edit/check-in/check-out/cancel,
-//! availability, board, payments and folio (README Ã‚Â§9, Ã‚Â§12).
+//! availability, board, payments and folio (README §9, §12).
 use super::{ApiError, AResult};
 use crate::auth::AuthUser;
 use crate::db;
@@ -90,39 +90,6 @@ async fn price_for_date(
     Ok(price.flatten().unwrap_or(0))
 }
 
-/// Effective price for a room type on a date: latest matching price rule,
-/// else the room type base price.
-async fn effective_price_for_date(
-    conn: &mut sqlx::PgConnection,
-    hotel_id: i64,
-    room_type_id: Uuid,
-    date: chrono::NaiveDate,
-) -> Result<i64, ApiError> {
-    let rule = match price_for_date(conn, hotel_id, room_type_id, date).await {
-        Ok(rule) => rule,
-        Err(e) => {
-            tracing::warn!("effective_price: rules lookup failed: 0={}", e.1);
-            return Err(e);
-        }
-    };
-    if rule > 0 {
-        return Ok(rule);
-    }
-    let base: i64 = match sqlx::query_scalar("SELECT base_price_cents FROM room_types WHERE id = $1")
-        .bind(room_type_id)
-        .fetch_one(&mut *conn)
-        .await
-    {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::warn!("effective_price: base lookup failed: {e}");
-            return Err(ApiError::from(e));
-        }
-    };
-    Ok(base)
-}
-
-
 pub(crate) async fn rates_for_stay(
     conn: &mut sqlx::PgConnection,
     hotel_id: i64,
@@ -168,9 +135,8 @@ async fn room_type_of(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("room lookup: {e}")))
 }
-type SQL_ERR = (StatusCode, String);
 
-/// Maintain daily_revenue rows for a reservation change (README Ã‚Â§10): same transaction!
+/// Maintain daily_revenue rows for a reservation change (README §10): same transaction!
 pub async fn upsert_daily_revenue(
     conn: &mut sqlx::PgConnection,
     res: &ReservationUpsertInfo,
@@ -249,7 +215,7 @@ async fn list(
     db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
 
     let limit = q.limit.unwrap_or(50).min(200);
-    // Keyset pagination on created_at + id (never OFFSET Ã¢â‚¬â€ README Ã‚Â§12).
+    // Keyset pagination on created_at + id (never OFFSET — README §12).
     let after_uuid = q.after.as_ref().and_then(|s| Uuid::parse_str(s).ok());
     let rows: Vec<ReservationDto> = sqlx::query_as(
         r#"SELECT id, hotel_id, room_id, channel_id, guest_id, checkin_date, checkout_date, status,
@@ -276,7 +242,7 @@ async fn list(
     Ok(Json(ApiResponse { success: true, data: rows, error: None }))
 }
 
-/// Total rows for the same filters as `list` — powers the reference list
+/// Total rows for the same filters as `list` ? powers the reference list
 /// footer ("86 records", "1-20 / 86") without OFFSET paging.
 async fn count(
     State(state): State<AppState>,
@@ -398,7 +364,7 @@ pub async fn create(
     .await
     .map_err(|e| ApiError(StatusCode::CONFLICT, format!("cannot book (no double booking): {e}")))?;
 
-    // audit + pre-aggregation in the SAME transaction (README §10/§11).
+    // audit + pre-aggregation in the SAME transaction (README ?10/?11).
     // record_change runs LAST: it row-locks the hotels row (change-seq bump)
     // until commit, so keeping it last keeps the critical section (~0 queries
     // + commit) short enough for concurrent saves to hit the p95 target.
@@ -503,7 +469,7 @@ pub async fn edit(
     .map_err(|e| ApiError(StatusCode::CONFLICT, format!("update not allowed (no double booking): {e}")))?;
 
     let op_id = Uuid::now_v7();
-    // record_change last (row-locks the hotels row until commit — see create)
+    // record_change last (row-locks the hotels row until commit ? see create)
     db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "reservation", id, "updated",
         Some(serde_json::to_value(&existing).unwrap_or_default()), Some(serde_json::json!(&body))).await?;
     upsert_daily_revenue(&mut conn, &ReservationUpsertInfo {
@@ -551,7 +517,7 @@ pub async fn status_change(
         .bind(id).bind(new_status).bind(auth.hotel_id)
         .execute(&mut *conn).await.map_err(ApiError::from)?;
     let op_id = Uuid::now_v7();
-    // record_change last (row-locks the hotels row until commit — see create)
+    // record_change last (row-locks the hotels row until commit ? see create)
     db::write_audit(&mut conn, auth.hotel_id, Some(auth.user_id), "reservation", id, new_status,
         Some(serde_json::json!({"status": existing.status})), Some(serde_json::json!({"status": new_status}))).await?;
     if new_status == "cancelled" {
@@ -680,14 +646,14 @@ async fn board(
     .await
     .map_err(ApiError::from)?;
 
-    // housekeeping role must never see guest names/prices (README §6)
+    // housekeeping role must never see guest names/prices (README ?6)
     let see_financials = hms_core::roles::Role::from_str(&auth.role)
         .map(|r| r.can_see_financials_and_guests())
         .unwrap_or(true);
 
     // Batched per-room-type pricing at the board start date: ONE query for all
     // room types (the effective price the per-room loop used to look up
-    // individually — O(rooms) queries per request).
+    // individually ? O(rooms) queries per request).
     let rt_prices: Vec<(Uuid, i64)> = sqlx::query_as(
         r#"SELECT rt.id,
                   COALESCE(NULLIF(
@@ -740,8 +706,8 @@ async fn board(
         });
     }
 
-    // day occupancy + cheapest effective price — ONE query for the whole range
-    // (the previous code ran one query per day × room type)
+    // day occupancy + cheapest effective price ? ONE query for the whole range
+    // (the previous code ran one query per day ? room type)
     let by_day: Vec<(chrono::NaiveDate, i64, Option<i64>)> = sqlx::query_as(
         r#"SELECT d.t::date,
                   (SELECT count(*) FROM reservations res
@@ -863,7 +829,7 @@ async fn record_payment(
     .await
     .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("payment insert: {e}")))?;
 
-    // daily_revenue: collected money tracked on the payment day (README Ã‚Â§10)
+    // daily_revenue: collected money tracked on the payment day (README §10)
     sqlx::query(
         r#"INSERT INTO daily_revenue (hotel_id, date, room_id, room_type_id, channel_id, payment_collected_cents, occupied)
            VALUES ($1, $2, $3, (SELECT room_type_id FROM rooms WHERE id = $3), $4,
@@ -914,7 +880,7 @@ async fn reverse_payment(
         return Err(ApiError(StatusCode::BAD_REQUEST, "cannot reverse a reversal".into()));
     }
 
-    // Corrections = reversal entry + never edits (README Ã‚Â§7)
+    // Corrections = reversal entry + never edits (README §7)
     let rid = Uuid::now_v7();
     let op_id = Uuid::now_v7();
     let day = chrono::Utc::now().date_naive();

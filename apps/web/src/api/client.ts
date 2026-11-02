@@ -27,6 +27,7 @@ import type {
   SummaryReport,
   UserDto,
 } from '../types/generated/api'
+import { desktop, isDesktop } from './desktop'
 
 // API base. The browser build talks to its own origin (`/api/v1`, proxied to the
 // Rust server by Vite in dev/preview and by nginx/Caddy in production). The
@@ -95,6 +96,38 @@ export function sessionHasPermission(session: Session | null, perm: string): boo
   return session.permissions.includes(perm)
 }
 
+// ------------------------------------------------ desktop local-first writes
+// (todo A1): inside the Tauri webview every write goes through the native
+// shell. The command stages the mirror row + outbox op in ONE SQLite
+// transaction and, when a session exists, runs one push+pull cycle so the
+// server's canonical state replaces the optimistic values. Queued (offline)
+// writes return the optimistic DTO; canonical values arrive with the next
+// pull and a re-fetch.
+async function localWrite<T>(
+  entity: string,
+  operation: string,
+  payload: unknown,
+  entityId: string | null,
+  canonical?: (id: string) => Promise<T>,
+): Promise<T> {
+  const outcome = await desktop.localWrite(entity, operation, entityId, payload)
+  if (outcome.status === 'confirmed' && canonical) {
+    try {
+      return await canonical(outcome.entity_id)
+    } catch {
+      // push confirmed but the canonical refetch failed — optimistic fallthrough
+    }
+  }
+  return { ...(payload as Record<string, unknown>), id: outcome.entity_id } as T
+}
+
+/** First matching element of a list, else an opt-time stub when the mirror is
+ * ahead of the server list call (queued writes). */
+async function firstOrStub<T extends { id: string }>(p: Promise<T[]>, id: string, stub: Record<string, unknown>): Promise<T> {
+  const rows = await p
+  return rows.find((r) => r.id === id) ?? ({ ...stub, id } as unknown as T)
+}
+
 export const api = {
   // ---------------------------------------------------------------- auth
   // `offline` is set by the desktop webview (README §11.7) so the response
@@ -131,13 +164,21 @@ export const api = {
   // ---------------------------------------------------------------- rooms
   listRoomTypes: () => request<RoomTypeDto[]>('/room-types'),
   listRooms: () => request<RoomDto[]>('/rooms'),
-  setCleanliness: (roomId: string, cleanliness: string, notes?: string) =>
-    request<RoomDto>(`/rooms/${roomId}/cleanliness`, { method: 'PATCH', body: { cleanliness, notes } }),
+  setCleanliness: (roomId: string, cleanliness: string, notes?: string) => {
+    if (!isDesktop) return request<RoomDto>(`/rooms/${roomId}/cleanliness`, { method: 'PATCH', body: { cleanliness, notes } })
+    // local-first (todo A1): mirror op + optimistic row; refetch canonical list
+    return localWrite<RoomDto>('cleanliness', 'update', { cleanliness }, roomId, (id) =>
+      firstOrStub(request<RoomDto[]>('/rooms'), id, { room_number: '', cleanliness }),
+    )
+  },
 
   // ---------------------------------------------------------------- guests
   listGuests: (search?: string) => request<GuestDto[]>('/guests', { query: { search } }),
-  createGuest: (b: { full_name: string; nationality?: string; phone?: string; email?: string; is_primary?: boolean }) =>
-    request<GuestDto>('/guests', { method: 'POST', body: b }),
+  createGuest: (b: { full_name: string; nationality?: string; phone?: string; email?: string; is_primary?: boolean }) => {
+    if (!isDesktop) return request<GuestDto>('/guests', { method: 'POST', body: b })
+    // local-first (todo A1): the shell adopts the client UUID server-side
+    return localWrite<GuestDto>('guest', 'insert', { is_primary: true, ...b }, null)
+  },
 
   // ---------------------------------------------------------------- channels/price rules
   listChannels: () => request<ChannelDto[]>('/channels'),
@@ -149,21 +190,73 @@ export const api = {
   listReservations: (q?: ReservationListQuery) => request<ReservationDto[]>('/reservations', { query: q as ReqInit['query'] }),
   reservationsCount: (q?: ReservationListQuery) => request<number>('/reservations/count', { query: q as ReqInit['query'] }),
   getReservation: (id: string) => request<ReservationDto>(`/reservations/${id}`),
-  createReservation: (b: CreateReservationBody) => request<ReservationDto>('/reservations', { method: 'POST', body: b }),
-  editReservation: (id: string, patch: Partial<CreateReservationBody>) =>
-    request<ReservationDto>(`/reservations/${id}`, { method: 'PATCH', body: patch }),
-  checkIn: (id: string) => request<ReservationDto>(`/reservations/${id}/check-in`, { method: 'POST' }),
-  checkOut: (id: string) => request<ReservationDto>(`/reservations/${id}/check-out`, { method: 'POST' }),
-  cancelReservation: (id: string) => request<ReservationDto>(`/reservations/${id}/cancel`, { method: 'POST' }),
+  createReservation: (b: CreateReservationBody) => {
+    if (!isDesktop) return request<ReservationDto>('/reservations', { method: 'POST', body: b })
+    // local-first (todo A1): staged offline-capable create; canonical values
+    // (number, status incl. `conflict`, priced total) arrive with the pull
+    return localWrite<ReservationDto>('reservation', 'insert', b, null, (id) =>
+      request<ReservationDto>(`/reservations/${id}`),
+    )
+  },
+  editReservation: (id: string, patch: Partial<CreateReservationBody>) => {
+    if (!isDesktop) return request<ReservationDto>(`/reservations/${id}`, { method: 'PATCH', body: patch })
+    return localWrite<ReservationDto>('reservation', 'update', patch, id, () =>
+      request<ReservationDto>(`/reservations/${id}`),
+    )
+  },
+  checkIn: (id: string) => {
+    if (!isDesktop) return request<ReservationDto>(`/reservations/${id}/check-in`, { method: 'POST' })
+    return localWrite<ReservationDto>('reservation', 'update', { status: 'checked_in' }, id, () =>
+      request<ReservationDto>(`/reservations/${id}`),
+    )
+  },
+  checkOut: (id: string) => {
+    if (!isDesktop) return request<ReservationDto>(`/reservations/${id}/check-out`, { method: 'POST' })
+    return localWrite<ReservationDto>('reservation', 'update', { status: 'checked_out' }, id, () =>
+      request<ReservationDto>(`/reservations/${id}`),
+    )
+  },
+  cancelReservation: (id: string) => {
+    if (!isDesktop) return request<ReservationDto>(`/reservations/${id}/cancel`, { method: 'POST' })
+    return localWrite<ReservationDto>('reservation', 'update', { status: 'cancelled' }, id, () =>
+      request<ReservationDto>(`/reservations/${id}`),
+    )
+  },
 
   // ---------------------------------------------------------------- payments/folio
   listPayments: (reservationId: string) => request<PaymentDto[]>(`/reservations/${reservationId}/payments`),
-  addPayment: (reservationId: string, b: { amount_cents: number; payment_type: string; currency?: string; reference?: string }) =>
-    request<PaymentDto>(`/reservations/${reservationId}/payments`, { method: 'POST', body: b }),
-  reversePayment: (paymentId: string) => request<PaymentDto>(`/payments/${paymentId}/reverse`, { method: 'POST' }),
+  addPayment: (reservationId: string, b: { amount_cents: number; payment_type: string; currency?: string; reference?: string }) => {
+    if (!isDesktop) return request<PaymentDto>(`/reservations/${reservationId}/payments`, { method: 'POST', body: b })
+    // append-only local write (todo A1): reversals are negative amounts
+    return localWrite<PaymentDto>('payment', 'insert', { ...b, reservation_id: reservationId }, null, (id) =>
+      firstOrStub(api.listPayments(reservationId), id, { ...b, reservation_id: reservationId, currency: b.currency ?? 'TRY', is_reversal: b.amount_cents < 0, created_at: '', reference: b.reference ?? null } as Record<string, unknown>),
+    )
+  },
+  reversePayment: (paymentId: string) => {
+    if (!isDesktop) return request<PaymentDto>(`/payments/${paymentId}/reverse`, { method: 'POST' })
+    // offline reversal (README §7): read the original from the mirror, then
+    // stage a NEGATIVE insert — payments are append-only, never edited
+    return (async () => {
+      const original = await desktop.paymentLookup(paymentId)
+      const body = {
+        reservation_id: original.reservation_id,
+        amount_cents: -original.amount_cents,
+        currency: original.currency,
+        payment_type: 'refund',
+        reference: null as string | null,
+      }
+      return localWrite<PaymentDto>('payment', 'insert', body, null, (id) =>
+        firstOrStub(api.listPayments(original.reservation_id), id, { ...body, is_reversal: true, created_at: '' } as Record<string, unknown>),
+      )
+    })()
+  },
   listFolio: (reservationId: string) => request<FolioDto[]>(`/reservations/${reservationId}/folio`),
-  addFolio: (reservationId: string, b: { category: string; description: string; unit_price_cents: number; quantity: number }) =>
-    request<FolioDto>(`/reservations/${reservationId}/folio`, { method: 'POST', body: b }),
+  addFolio: (reservationId: string, b: { category: string; description: string; unit_price_cents: number; quantity: number }) => {
+    if (!isDesktop) return request<FolioDto>(`/reservations/${reservationId}/folio`, { method: 'POST', body: b })
+    return localWrite<FolioDto>('folio', 'insert', { ...b, reservation_id: reservationId }, null, (id) =>
+      firstOrStub(api.listFolio(reservationId), id, { ...b, reservation_id: reservationId, total_cents: b.unit_price_cents * b.quantity, currency: 'TRY', created_at: '' } as Record<string, unknown>),
+    )
+  },
 
   // ---------------------------------------------------------------- board
   board: (from: string, to: string) => request<BoardResponse>('/board', { query: { from, to } }),

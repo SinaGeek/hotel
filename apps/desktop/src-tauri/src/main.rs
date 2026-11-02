@@ -10,6 +10,7 @@
 //! lockout at the next sync.
 
 mod dpapi;
+mod local_first;
 mod local_store;
 mod offline;
 mod reports;
@@ -175,6 +176,99 @@ async fn sync_now(state: tauri::State<'_, AppState>) -> Result<serde_json::Value
         .map_err(|e| e.to_string())
 }
 
+/// Local-first write (todo A1): stage the optimistic mirror row + outbox op
+/// in ONE SQLite transaction, then — when a session token exists —
+/// immediately run one sync cycle so the push reaches the server and the
+/// pull overwrites the optimistic values with the server's canonical state
+/// (ids, status, price, conflict flag). Returns `confirmed` when the op left
+/// the outbox in that cycle, `queued` otherwise (offline / network failure /
+/// rejected) — queued writes are never lost, the background worker retries.
+#[tauri::command]
+async fn local_write(
+    state: tauri::State<'_, AppState>,
+    entity: String,
+    operation: String,
+    entity_id: Option<String>,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let mut store = LocalStore::open(&state.db_path).map_err(|e| e.to_string())?;
+    let hotel_id = store.hotel_id().map_err(|e| e.to_string())?;
+    let e = local_first::entity_of(&entity)?;
+    let o = local_first::operation_of(&operation)?;
+    let eid = match &entity_id {
+        Some(s) => Some(
+            s.parse::<uuid::Uuid>()
+                .map_err(|_| "entity_id is not a UUID".to_string())?,
+        ),
+        None => None,
+    };
+    let op = local_first::stage_local_write(&mut store, hotel_id, e, o, eid, payload)?;
+    let oid = op.operation_id;
+    let id_s = op.entity_id.to_string();
+
+    let online = (*state.token.read().await).is_some();
+    let mut cycle_error: Option<String> = None;
+    if online {
+        let outcome = run_cycle(
+            state.api_base.clone(),
+            state.token.clone(),
+            state.db_path.clone(),
+        )
+        .await;
+        match &outcome {
+            Ok(_) => {}
+            Err(SyncFailure::AccountLocked(_)) => {
+                // deactivated user: the next sync already wipes the cache;
+                // surface Locked and keep the write queued
+                let _ = state.synced_tx().send(SyncState::Locked);
+                cycle_error = Some("account locked; sign in online".into());
+            }
+            Err(err) => cycle_error = Some(err.to_string()),
+        }
+        if !local_first::op_is_still_pending(&mut store, oid)? {
+            if let Ok(msg) = summarize(&state.db_path, None) {
+                let _ = state.synced_tx().send(msg);
+            }
+            return Ok(serde_json::to_value(local_first::WriteOutcome::Confirmed {
+                operation_id: oid.to_string(),
+                entity_id: id_s,
+            })
+            .expect("serializable"));
+        }
+    }
+    Ok(serde_json::to_value(local_first::WriteOutcome::Queued {
+        operation_id: oid.to_string(),
+        entity_id: id_s,
+        reason: cycle_error
+            .unwrap_or_else(|| "offline or no session; stored locally and queued".into()),
+    })
+    .expect("serializable"))
+}
+
+/// Mirror lookup of a payment (offline reversal building): returns
+/// `{ reservation_id, amount_cents, currency }` or an error when the payment
+/// is not on this device yet (never guessed — the server stays the authority).
+#[tauri::command]
+async fn local_payment_lookup(
+    state: tauri::State<'_, AppState>,
+    payment_id: String,
+) -> Result<serde_json::Value, String> {
+    let mut store = LocalStore::open(&state.db_path).map_err(|e| e.to_string())?;
+    match store
+        .payment_mirror_lookup(&payment_id)
+        .map_err(|e| e.to_string())?
+    {
+        Some((reservation_id, amount_cents, currency)) => Ok(json!({
+            "reservation_id": reservation_id,
+            "amount_cents": amount_cents,
+            "currency": currency,
+        })),
+        None => Err(
+            "payment not found on this device; connect and sync online first".into(),
+        ),
+    }
+}
+
 /// SyncOutcome is a report for the status pill, serialized by hand (the
 /// engine's plain struct deliberately has no serde).
 fn cycle_summary(o: &SyncOutcome) -> serde_json::Value {
@@ -319,6 +413,8 @@ async fn main() {
             remember_offline_credentials,
             offline_login,
             offline_reports,
+            local_write,
+            local_payment_lookup,
             sync_now
         ])
         .setup(move |_app| {

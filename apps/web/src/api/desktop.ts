@@ -90,4 +90,33 @@ export const desktop = {
     invoke<OfflineReports>('offline_reports', { from, to }),
   // manual sync trigger
   syncNow: () => invoke<unknown>('sync_now'),
+
+  // ------------------------------------------------ local-first writes (A1)
+  /** STAGE locally (mirror + outbox in one transaction) then push+pull
+   * immediately when online. `entity_id: null` on creates (the shell
+   * generates a UUIDv7 and adopts it server-side). */
+  localWrite: (
+    entity: string,
+    operation: string,
+    entityId: string | null,
+    payload: unknown,
+  ) => invoke<WriteOutcome>('local_write', { entity, operation, entityId, payload }),
+  /** Original payment from the mirror — used to build a reversal row
+   * offline; the mirror must already hold the payment (pulled by sync). */
+  paymentLookup: (paymentId: string) =>
+    invoke<PaymentMirror>('local_payment_lookup', { paymentId }),
+}
+
+export interface WriteOutcome {
+  status: 'confirmed' | 'queued'
+  operation_id: string
+  entity_id: string
+  /** present on queued: why the write is waiting for the next sync cycle */
+  reason?: string
+}
+
+export interface PaymentMirror {
+  reservation_id: string
+  amount_cents: number
+  currency: string
 }

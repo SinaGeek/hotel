@@ -673,6 +673,27 @@ impl SyncStore for LocalStore {
 }
 
 impl LocalStore {
+    /// Direct access to the mirror for local-first staging (same crate only).
+    pub(crate) fn conn_for_local_writes(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
+    /// Mirror lookup of a payment so the webview can build a reversal row
+    /// offline (reversals are negative payment inserts — README §7).
+    pub fn payment_mirror_lookup(
+        &mut self,
+        payment_id: &str,
+    ) -> Result<Option<(String, i64, String)>, StoreError> {
+        self.conn
+            .query_row(
+                "SELECT reservation_id, amount_cents, currency FROM payments WHERE id = ?1",
+                params![payment_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .map_err(se)
+    }
+
     fn bump_cursor(&mut self, seq: i64) -> Result<(), StoreError> {
         // only forward (monotonic per-hotel counter; never a timestamp)
         let cur = self.pull_cursor()?;
@@ -683,7 +704,7 @@ impl LocalStore {
     }
 }
 
-fn entity_name(e: EntityType) -> &'static str {
+pub(crate) fn entity_name(e: EntityType) -> &'static str {
     match e {
         EntityType::RoomType => "room_type",
         EntityType::Room => "room",
@@ -713,7 +734,7 @@ fn entity_of(s: &str) -> EntityType {
     }
 }
 
-fn operation_name(o: OperationType) -> &'static str {
+pub(crate) fn operation_name(o: OperationType) -> &'static str {
     match o {
         OperationType::Insert => "insert",
         OperationType::Update => "update",

@@ -1,455 +1,312 @@
-# Unified HMS: Multi-Hotel Management System
+# HMS: Multi-Hotel Management System
 
-A multi-tenant hotel management system for 1,000+ hotels (about 50 rooms each), with a web app and a standalone Windows desktop app that keeps working when the internet or the server is down and syncs when the connection returns.
+A multi-tenant hotel management system for 1,000+ hotels (about 50 rooms each).
+It ships as:
 
-It merges two existing products into one:
+1. a **web app** (React) for any browser, and
+2. a **Windows desktop app** (Tauri 2) that works with no internet, keeps a
+   **local database**, syncs with the **online database**, and **updates itself**.
 
-- **app.hmsflow.com**: the visual reference for the UI (layout, navigation, colors, component style). The UI is original code.
-- **app.hms.gen.tr** (HMS Hotel Software): every feature it offers must exist in this system.
+> **For AI agents:** this file is the specification. `TODOS.md` is the ordered
+> work list. Read both fully before changing anything. When they conflict with
+> code that already exists, the rules in section 2 win.
 
-> **Status (2026-11-01):** the Rust/Axum server, Postgres migrations, React/Vite web app, reporting endpoints, versioned sync engine, Tauri desktop shell, SQLite mirror, Windows MSI packaging and the platform **admin panel** (`/admin`: hotels + users) are implemented. `docs/server-api.md` is the source-derived route snapshot; `docs/feature-inventory.md` is the site-2 inventory. Deployment assets (Dockerfile, compose server service, Caddy/nginx samples, Prometheus `/metrics`, backup script) and the guest-key rotation tool are in place. Remaining blockers and their step-by-step plans live in **`final_product_remains.md`** (SQLCipher, Tauri auto-updater, production stack verification, desktop E2E, OpenAPI/TS codegen).
+It merges two existing products:
 
----
-
-## Table of contents
-
-1. [Goals and scale targets](#1-goals-and-scale-targets)
-2. [Architecture](#2-architecture)
-3. [Tech stack](#3-tech-stack)
-4. [Feature inventory](#4-feature-inventory)
-5. [Repository structure](#5-repository-structure)
-6. [Roles and permissions](#6-roles-and-permissions)
-7. [Data model](#7-data-model)
-8. [Multi-tenancy and security](#8-multi-tenancy-and-security)
-9. [Reservations and availability](#9-reservations-and-availability)
-10. [Reports](#10-reports)
-11. [Offline desktop app and sync](#11-offline-desktop-app-and-sync)
-12. [API overview](#12-api-overview)
-13. [Performance plan](#13-performance-plan)
-14. [Getting started](#14-getting-started)
-15. [Configuration](#15-configuration)
-16. [Testing](#16-testing)
-17. [Deployment and operations](#17-deployment-and-operations)
-18. [Roadmap](#18-roadmap)
-19. [Known limitations](#19-known-limitations)
+- **app.hmsflow.com**: visual reference only (layout, navigation, colors). All UI code is original.
+- **app.hms.gen.tr**: every feature it offers must exist here (see `docs/feature-inventory.md`).
 
 ---
 
-## 1. Goals and scale targets
+## 1. Language and stack rules
 
-| Goal | Target |
+**Rust for every program. TypeScript/React only for the UI.**
+
+| Layer | Choice |
 |---|---|
-| Hotels (tenants) | 1,000+ |
-| Rooms per hotel | about 50 (about 50,000 rooms total) |
-| Data volume | millions of reservations and payments over time |
-| Room board, availability search, reservation save | p95 under 200 ms |
-| Full-year report for one hotel | under 500 ms |
-| Offline use | each hotel keeps working with no internet or server |
-| Tenant isolation | one hotel can never read or write another hotel's data |
-| Double booking | prevented by the database, not just application code |
+| Server | Rust, Axum, SQLx |
+| Shared logic | Rust crate `hms-core` (models, validation, permissions, sync types) used by server and desktop |
+| Sync engine | Rust crate `hms-sync` (outbox, pull cursor, retry, conflict handling) |
+| Online database | PostgreSQL 16+ (RLS, `btree_gist`, exclusion constraints) |
+| Local database | SQLite + SQLCipher inside the desktop app |
+| Web UI | React + Vite + TypeScript, static SPA, also embedded in the desktop app |
+| Desktop | Tauri 2 (WebView2), Rust core, `tauri-plugin-updater`, MSI installer |
+| Types | OpenAPI generated from Rust (`utoipa`) -> TypeScript (`openapi-typescript`) |
+| Load tests | k6 and `crates/hms-tests` runner |
+| Containers | Docker + Compose |
 
-At this scale, speed comes mostly from database design (indexes, pre-aggregated reports, caching) rather than from the choice of language. Rust gives low latency spikes, low memory use and low server cost.
+Never add a second backend language. Never add a heavy UI framework beyond React.
 
 ---
 
-## 2. Architecture
+## 2. Non-negotiable rules (read first)
+
+### 2.1 The online database is the authority
+
+- The **PostgreSQL server is the single source of truth.** The local database is
+  a working copy that exists so the hotel can keep operating when the internet
+  or server is down.
+- Whenever the two disagree, **the online database wins.** The desktop app
+  never overwrites server data by guessing.
+- The desktop app must **always try to sync**: automatically on start, on a
+  timer (default 30 s), when the network comes back, and after every local
+  write.
+
+### 2.2 Local and online work at the same time
+
+- When online, the desktop app talks to the server and mirrors every change
+  into the local database at the same moment (the local copy is always warm).
+- When offline, every write goes into the local database **and** an outbox in
+  one transaction. Nothing is lost.
+- When the connection returns, the outbox is pushed, then changes are pulled.
+  The user never has to press a "sync" button (a manual button may exist too).
+
+### 2.3 Overbooking during an internet outage is accepted, and resolved by the server
+
+An offline PC cannot know about bookings made elsewhere (other PCs, Booking.com,
+Expedia, the web app). So overbooking can happen. This is allowed by design.
+The rule for resolving it:
+
+1. The server enforces no double booking with a PostgreSQL `EXCLUDE` constraint.
+2. The booking that **reached the server first wins** and keeps its room.
+3. The later booking is **never dropped or silently changed**. It is stored with
+   status `conflict` and shown to reception with a clear banner and a
+   reassignment tool (move to another room/date, or cancel with guest contact).
+4. The desktop app shows `conflict` items prominently after every sync.
+5. Client clocks are never trusted. Order is by server arrival.
+
+### 2.4 Other hard rules
+
+- **Multi-tenant:** every row has `hotel_id`; PostgreSQL row-level security plus
+  handler checks. Never trust a `hotel_id` from a request body.
+- **Payments are append-only.** Corrections are reversal rows plus a new payment.
+- **No hard deletes.** Use tombstones so deletes can sync.
+- **Every write** runs in one transaction that also writes `change_log` +
+  `audit_log` and updates `daily_revenue` where relevant.
+- **Secrets never go in the repo or in docs.** Passwords, keys, tokens and test
+  logins come from `.env`, a secret store, or CI secrets. `.env` and any
+  `userpass*.md` are gitignored. Do not copy credentials from chat or notes
+  into code, tests, docs or commit messages. Use the dev bootstrap variables
+  (section 8) for local logins.
+- Keep the permission matrix in `crates/hms-core/src/roles.rs` identical to the
+  table in section 5; `crates/hms-tests/tests/roles_matrix.rs` enforces it.
+- Dates are stored in UTC and shown in the hotel's time zone.
+
+---
+
+## 3. Architecture
 
 ```
-                    +-----------------------------+
-                    |   Web app (React + Vite)    |
-                    |   browser, any device       |
-                    +--------------+--------------+
-                                   | HTTPS / JSON
-                                   v
-+----------------------+   +-------+-----------------------+   +--------------+
-| Windows desktop app  |   |  hms-server (Rust, Axum)      |   | PostgreSQL   |
-| Tauri 2 + same UI    |<->|  auth, RBAC, REST API, sync   |<->| RLS, hotel_id|
-| Rust core + SQLite   |   |  report aggregation, audit    |   | on every row |
-| (encrypted, offline) |   +-------------------------------+   +--------------+
-+----------+-----------+
-           ^ push outbox / pull changes (sync protocol, versioned)
-           +--------------------------> hms-server
-```
-
-Key ideas:
-
-- **One UI codebase** runs in the browser and inside the Tauri desktop shell.
-- **One shared Rust crate** (`hms-core`) holds models, validation, the permission matrix and sync protocol types, used by both the server and the desktop core. TypeScript types are generated from it so UI, API and desktop never drift.
-- **The server is the authority.** Desktop apps are full replicas of their own hotel only and reconcile with the server by rules, not by guessing.
-
----
-
-## 3. Tech stack
-
-| Layer | Choice | Notes |
-|---|---|---|
-| Server | Rust, Axum, SQLx | If Rust is not workable, TypeScript (Fastify) with every rule in this document unchanged |
-| Database | PostgreSQL | Row-level security, exclusion constraints, `btree_gist` |
-| Web UI | TypeScript, React, Vite | Static single-page app (no Next.js server features) so the desktop app can embed it |
-| Charts | ECharts or Recharts | Same chart components on web and desktop |
-| Room calendar | Resource timeline/scheduler component | Rooms as rows, dates as columns |
-| Desktop shell | Tauri 2 (WebView2) | Small installer, native Windows integration |
-| Desktop core | Rust + SQLite with SQLCipher | Encrypted local database; key protected via Windows DPAPI / Credential Manager |
-| Type sharing | OpenAPI generation or `ts-rs` | Generates TypeScript from Rust types |
-| Load testing | k6 | Run against seed data for 1,000 hotels |
-| Containers | Docker Compose | Server + database for development and simple deployments |
-| Editor | VS Code | rust-analyzer, ESLint, Tauri extensions |
-
----
-
-## 4. Feature inventory
-
-Verified against site 2 (**app.hms.gen.tr**, live session on 2026-10-27) and the site 1 UI reference. Full evidence per area in `docs/feature-inventory.md` (+ screenshots). "Deferred" = module exists on site 2 but is intentionally out of the first version (see inventory doc).
-
-| Area | Planned features | Verified against site 2 |
-|---|---|---|
-| Reservations | calendar/room board, list, detail, create/edit/cancel, check-in/out | **verified** (list, detail with tabs, check-in/out, print; group/channel reservations deferred) |
-| Guests | guest records, history | **verified** (records, ID/passport, balance, import/export) |
-| Rooms | room types (name, capacity, base price, amenities), rooms | **verified** (rooms + 7 room types as data; CRUD menu admin-only) |
-| Pricing | base price, price rules (seasonal etc.) | **verified** (periodic per-day calendar 2021–2031 + conditional pricing rules) |
-| Payments | payments and folio per reservation, reversal entries | **verified** (collection/payment tab, account activities, bank transactions) |
-| Channels | direct, walk-in, Booking, Expedia, agency, other (configurable per hotel) | **verified as list/status**; deep channel-manager sync **deferred** |
-| Housekeeping | room board with cleanliness status | **verified** (board + print; site-2 uses Dirty/Clean + Out of Order) |
-| Users and roles | hotel accounts, role permissions | **verified** (profile, password change, 2FA present; CRUD admin-only) |
-| Reports | earnings per channel/day/month/room, occupancy, ADR, RevPAR | **verified** (earnings by section, occupancy w/ chart; site 2 has no per-channel earnings report) |
-| Audit | change history for every record | **verified** (/raporlar/log/ with user, IP, section, add/delete/update, comments) |
-| Localization | Turkish and English UI, TRY and other currencies | **verified** (Program Language switch; TRY everywhere) |
-| Export | CSV and PDF | **verified** (Print + guest/agency import-export) |
-| Layout | mobile-friendly web layout | **verified** (board works at ~510px viewport) |
-
-Out-of-scope site-2 modules (deferred): invoices with e-invoice/e-archive, agency currents, currency exchange, cash accounts/banks, online guest payments, open sales, expenses/stock, SMS/e-mail campaign tooling, Wi-Fi/IP tools, notifications/announcements/messaging, end-of-day close, packages/licensing. See `docs/feature-inventory.md` for the proposal table.
-
----
-
-## 5. Repository structure
-
-```
-hms/
-├── Cargo.toml                    # Rust workspace
-├── README.md
-├── docker-compose.yml            # server + PostgreSQL for development
-├── .env.example                  # all configuration variables, no secrets
-│
-├── crates/
-│   ├── hms-core/                 # shared by server and desktop
-│   │   ├── models/               # hotels, rooms, reservations, payments ...
-│   │   ├── validation/           # input rules used on both sides
-│   │   ├── permissions/          # role -> permission matrix
-│   │   └── sync/                 # operation types, protocol version, conflict rules
-│   ├── hms-server/               # Axum API
-│   │   ├── auth/                 # login, sessions, rate limiting
-│   │   ├── api/                  # REST handlers (hotels, rooms, reservations ...)
-│   │   ├── sync/                 # /sync/push, /sync/pull, idempotency
-│   │   ├── reports/              # aggregate maintenance and report queries
-│   │   └── audit/                # audit log writer
-│   └── hms-sync/                 # client-side sync engine (outbox, pull cursor, retry)
-│
-├── apps/
-│   ├── web/                      # React + Vite UI (also embedded by desktop)
-│   │   ├── src/pages/            # board, reservations, rooms, users, reports ...
-│   │   ├── src/components/
-│   │   ├── src/i18n/             # tr, en
-│   │   └── src/api/              # generated client + types
-│   └── desktop/
-│       └── src-tauri/            # Tauri 2 Rust core: SQLite/SQLCipher, commands, updater
-│
-├── migrations/                   # PostgreSQL schema migrations (server)
-├── desktop-migrations/           # SQLite schema migrations (desktop)
-├── seed/                         # seed data generator (1,000 hotels x 50 rooms x 2 years)
-├── loadtest/                     # k6 scripts and benchmark report
-├── tests/                        # integration tests: permissions, isolation, sync, races
-└── docs/                         # API reference, sync protocol, decisions
+                 +-----------------------------+
+                 |   Web app (React + Vite)    |
+                 +--------------+--------------+
+                                | HTTPS / JSON
+                                v
++-----------------------+   +---+---------------------------+   +--------------+
+| Windows desktop app   |   | hms-server (Rust, Axum)       |   | PostgreSQL   |
+| Tauri 2 + same UI     |<->| auth, RBAC, REST, sync        |<->| RLS          |
+| Rust core + SQLCipher |   | reports, audit, conflicts     |   | (AUTHORITY)  |
+| (local, offline)      |   +-------------------------------+   +--------------+
++-----------+-----------+
+            | push outbox / pull changes (versioned sync protocol)
+            | auto-update check -> signed MSI from the update host
+            +----------------------------> hms-server / update host
 ```
 
 ---
 
-## 6. Roles and permissions
+## 4. Sync protocol (summary)
 
-Permissions are data: a role-to-permission matrix stored in the database, enforced on the server and in the desktop core. The UI only hides what a user may not do.
+1. **Local write:** update local row + append operation to outbox, one transaction.
+2. **Push:** `POST /api/v1/sync/push` sends outbox operations. Idempotent by
+   operation id (`sync_ops`), so retries never duplicate.
+3. **Pull:** each hotel has a monotonic `change_seq`.
+   `GET /api/v1/sync/pull?since=<seq>` returns changes after that number. Never
+   use `updated_at > last_sync`.
+4. **Protocol version:** server answers `426` to too-old clients; the desktop app
+   then triggers the updater.
+5. **Conflict rules**
 
-Each hotel has an ID, and users log in with **hotel ID + username + password**. Hotel ID `0` is the platform tenant.
+| Data | Rule |
+|---|---|
+| Reservations | Server enforces no double booking. Later arrival becomes `conflict` (see 2.3). |
+| Payments | Append-only; cannot conflict. |
+| Housekeeping status | Last write wins in server arrival order. |
+| Rooms, room types, users, price rules | Server wins. |
+
+6. **After sync** the desktop replaces local state with server state for anything
+   the server decided (including conflict flags and server-assigned numbers).
+
+### Offline login
+
+After the last online login the app caches the password verifier and role
+permissions (DPAPI-protected). The cache expires after `OFFLINE_LOGIN_DAYS`
+(default 14). A user deactivated on the server is locked out at the next sync.
+
+---
+
+## 5. Roles and permissions
+
+Users log in with **hotel ID + username + password**. Hotel `0` is the platform tenant.
+Permissions are data (DB matrix + per-hotel overrides), enforced on the server and
+in the desktop core. The UI only hides what a user may not do.
 
 | Capability | admin (hotel 0) | manager | reception | housekeeping |
 |---|:-:|:-:|:-:|:-:|
 | Create / edit / disable hotels | yes | no | no | no |
 | Define role abilities | yes | no | no | no |
-| Create accounts | yes (any) | yes (below manager) | no | no |
-| Define room types | yes | yes | no | no |
-| Create / edit rooms | yes | yes | no | no |
+| Create accounts | any | below manager | no | no |
+| Define room types, create/edit rooms | yes | yes | no | no |
 | Change reservation details | yes | yes | yes | no |
 | Record / change payments | yes | yes | yes | no |
 | See guest names, prices, payments | yes | yes | yes | no |
-| See room status (empty / occupied) | yes | yes | yes | yes |
+| See room status | yes | yes | yes | yes |
 | Change room cleanliness | yes | yes | yes | yes |
-| View reports | all hotels | own hotel | configurable | no |
+| View reports | all hotels | own hotel | configurable (default off) | no |
 
-Cleanliness states: `dirty`, `cleaning`, `clean`, `inspected`. Housekeeping sees only the room board and cleanliness, with no guest names, prices or payments.
-
-Report access for reception is not specified in the requirements. It defaults to off and is configurable per hotel.
-
----
-
-## 7. Data model
-
-Every table carries `hotel_id`. IDs are client-generated UUIDv7 so offline machines can create records without the server.
-
-| Table | Purpose |
-|---|---|
-| `hotels` | tenant record; holds the per-hotel `change_seq` counter |
-| `users` | accounts (hotel_id, username, Argon2id hash, role, active) |
-| `roles`, `role_permissions` | permission matrix |
-| `room_types` | name, capacity, base price, amenities |
-| `rooms` | number, room type, cleanliness status, active |
-| `guests` | guest records |
-| `channels` | direct, walk-in, Booking, Expedia, agency, other |
-| `price_rules` | seasonal or special pricing |
-| `reservations` | guest, room, channel, stay date range, price, status |
-| `payments` | **append-only** ledger; corrections are reversal entries |
-| `change_log` | per-hotel monotonic change number, entity, operation (drives sync pull) |
-| `sync_ops` | processed operation IDs (idempotency) |
-| `daily_revenue` | pre-aggregated per hotel, room, channel, day |
-| `audit_log` | who, what, when, old value, new value |
-
-Rules:
-
-- **No hard deletes.** Deletes are tombstones, so they can sync.
-- **Payments are never edited.** A correction is a new reversal entry plus a new payment.
-- Dates are stored in UTC and shown in the hotel's time zone.
+Cleanliness: `dirty`, `cleaning`, `clean`, `inspected`. Housekeeping never sees
+guest names, prices or payments.
 
 ---
 
-## 8. Multi-tenancy and security
+## 6. Features
 
-- One database, `hotel_id` on every row, enforced by **PostgreSQL row-level security** and by the auth layer. No query runs without a tenant scope.
-- Passwords hashed with **Argon2id**. Login rate limiting. Short-lived sessions with refresh.
-- **Audit log** for every change.
-- The seeded `admin` account (hotel ID 0) takes its initial password from configuration and **must change it on first login**. No fixed default password in production builds.
-- Credentials for the reference sites (used only during the feature inventory) are supplied through environment variables and never written to code, logs or commits.
-- Guest data is personal data (KVKK / GDPR): support per-hotel data export and deletion, and encrypt at rest where practical.
-- The desktop database is encrypted (SQLCipher) with the key protected by Windows DPAPI / Credential Manager.
+Reservations (board, list, detail, check-in/out, cancel), guests (encrypted
+identity fields, KVKK/GDPR export and delete), rooms and room types, pricing and
+price rules, payments and folio, channels, housekeeping, users and roles, reports
+(earnings by channel/day/month/room, occupancy, ADR, RevPAR, forecast, in-house,
+main courante), audit log, CSV/PDF export, English UI (Turkish planned), mobile
+friendly web layout, platform admin panel (`/admin`).
+
+Deferred site-2 modules (do not start without a product decision): e-invoice,
+stock/expenses, agency accounts, currency exchange, SMS campaigns, packages and
+licensing. Details in `docs/feature-inventory.md`.
 
 ---
 
-## 9. Reservations and availability
+## 7. Repository layout
 
-Double booking is prevented in the database:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS btree_gist;
-
-ALTER TABLE reservations
-  ADD CONSTRAINT no_double_booking
-  EXCLUDE USING gist (room_id WITH =, stay WITH &&)
-  WHERE (status NOT IN ('cancelled', 'conflict'));
+```
+crates/hms-core        shared models, roles, sync types, validation, guest encryption
+crates/hms-server      Axum API, sync endpoints, migrations runner, operator bins
+crates/hms-sync        client sync engine
+crates/hms-tests       integration tests + load-test runner
+apps/web               React + Vite SPA (also embedded in desktop)
+apps/desktop/src-tauri Tauri 2 shell, SQLite/SQLCipher mirror, DPAPI, updater
+migrations/            PostgreSQL migrations
+desktop-migrations/    SQLite migrations
+seed/                  dev and load-test seed data
+benchmarks/            load-test reports and k6 scripts
+deploy/                Caddy / nginx samples
+scripts/               backup scripts
+docs/                  API snapshot, feature inventory, runbooks, desktop verification
 ```
 
-- `stay` is a date range (check-in to check-out).
-- Reservations with status `conflict` come from offline sync collisions (see section 11) and are shown to reception for reassignment.
-- Availability search and the room board use indexes on `(hotel_id, room_id, stay)`.
-
 ---
 
-## 10. Reports
-
-All reports have a date-range filter and CSV/PDF export. Platform admin can see all hotels; hotel users see only their own.
-
-| Report | Chart |
-|---|---|
-| Earnings per **channel** | donut + bar |
-| Earnings per **day** | line |
-| Earnings per **month** | bar with year-over-year line |
-| Earnings per **room** and **room type** | ranked bar + heatmap |
-| Occupancy %, ADR, RevPAR | line / KPI cards |
-
-How they stay fast: reports never scan raw reservations. The `daily_revenue` table (hotel, room, channel, day) is updated in the same transaction as every reservation or payment change. Month and year views roll up from it.
-
-"Earnings" can mean money collected (payments by payment date) or room revenue accrued per stay night. Reports show **collected** by default and can switch to accrued. Confirm which one your hotels expect.
-
-The desktop app computes the same reports from its local data when offline.
-
----
-
-## 11. Offline desktop app and sync
-
-The desktop app holds a full local copy of its own hotel and works with no internet or server. It syncs through the API when connectivity returns.
-
-### How it works
-
-1. Every write updates the local SQLite row **and** appends an operation to a local **outbox** in one transaction.
-2. **Push:** the app sends outbox operations to `POST /api/v1/sync/push`. The endpoint is idempotent (deduplicated by operation ID), so repeated or interrupted syncs create no duplicates.
-3. **Pull:** each hotel has a monotonically increasing `change_seq`, assigned inside the write transaction. The client stores the last number it saw and calls `GET /api/v1/sync/pull?since=<seq>`. Do **not** use `updated_at > last_sync_time`, which can miss late-committing rows.
-4. Client clocks are never trusted. Far-future timestamps are rejected and conflicts are ordered by server arrival.
-
-### Conflict rules (by data type)
-
-| Data | Rule |
-|---|---|
-| Payments | Append-only. Corrections are reversal entries, so they cannot conflict. |
-| Housekeeping status | Last write wins, in server order. |
-| Rooms, room types, users, price rules | Manager-level data; server wins. |
-| Reservations | The server enforces the no-double-booking constraint. If two machines sold the same room, the later booking is accepted as `conflict` and flagged for reassignment. It is never silently overwritten or dropped. |
-
-CRDTs merge data well but cannot enforce business rules like "one guest per room per night", so this system uses an operation log with server arbitration.
-
-### Offline login
-
-After the last online login, the app caches the password verifier and role permissions. The cache expires after 14 days (configurable). A user deactivated on the server is locked out at the next sync. The desktop webview requests the verifier with `offline: true` in the login body; the server then echoes the argon2 PHC hash in `offline_verifier` (plain browser requests never receive it), and the desktop protects the persisted copy with Windows DPAPI.
-
-### Versioning and updates
-
-The sync protocol is versioned and schema migrations run on both sides, so old desktop versions in the field keep syncing. Tauri's auto-updater and an `.msi` installer handle distribution.
-
-### What the user sees
-
-Online/offline state, last-synced time, pending operation count and unresolved conflicts. The app clearly warns that:
-
-- Channel bookings (Booking, Expedia) made while offline are unknown until sync, so overbooking is possible until then.
-- Card payments cannot be processed offline; they can only be recorded.
-
-### Future option
-
-Several reception PCs in one hotel will not see each other's changes while the internet is down. The design leaves room for a local-network hub later; it is not part of the first version.
-
----
-
-## 12. API overview
-
-All endpoints are under `/api/v1`, JSON over HTTPS, and require a session except login. Planned endpoints:
-
-| Area | Endpoints |
-|---|---|
-| Auth | `POST /auth/login` (hotel ID, username, password), `POST /auth/refresh`, `POST /auth/logout`, `POST /auth/change-password` |
-| Hotels (admin) | `GET/POST /hotels`, `GET/PATCH /hotels/{id}` |
-| Roles (admin) | `GET /roles`, `PUT /roles/{id}/permissions` |
-| Users | `GET/POST /users`, `PATCH /users/{id}` |
-| Room types | `GET/POST /room-types`, `PATCH /room-types/{id}` |
-| Rooms | `GET/POST /rooms`, `PATCH /rooms/{id}`, `PATCH /rooms/{id}/cleanliness` |
-| Reservations | `GET/POST /reservations`, `GET/PATCH /reservations/{id}`, `POST /reservations/{id}/check-in`, `.../check-out`, `.../cancel` |
-| Payments | `GET/POST /reservations/{id}/payments`, `POST /payments/{id}/reverse` |
-| Board | `GET /board?from=&to=` |
-| Reports | `GET /reports/earnings?by=channel|day|month|room&from=&to=`, `GET /reports/occupancy` |
-| Sync | `POST /sync/push`, `GET /sync/pull?since=` |
-
-List endpoints use keyset pagination (never `OFFSET` on large tables). The API contract is published as OpenAPI and used to generate TypeScript types.
-
----
-
-## 13. Performance plan
-
-- Indexes: `(hotel_id, room_id, stay)`, `(hotel_id, status)`, `(hotel_id, created_at)`.
-- Keyset pagination everywhere on large tables.
-- Report queries read `daily_revenue`, not raw rows.
-- Cache read-heavy data (room types, rooms, today's room board) with invalidation on write.
-- Connection pooling, response compression, hashed static assets.
-- Per-hotel `change_seq` is incremented with a row lock inside the write transaction. At about 50 rooms per hotel this serializes writes within one hotel only, which is fine.
-
-Proof: a k6 load test against seed data of 1,000 hotels x 50 rooms x 2 years of reservations. The seed script (`seed/`) and results (`loadtest/REPORT.md`) are part of the deliverables. Targets are in section 1.
-
----
-
-## 14. Getting started
-
-Verified development workflow (prerequisites: Rust toolchain, Node.js with pnpm, Docker, and the Tauri 2 Windows prerequisites for desktop builds):
-
-```bash
-# 1. Configure local development environment
-cp .env.example .env
-# Set DATABASE_URL, SESSION_SECRET, and ADMIN_BOOTSTRAP_PASSWORD in .env.
-
-# 2. Start PostgreSQL (Compose does not start the Rust server)
-docker compose up -d db
-
-# 3. Start the API server in one terminal (applies PostgreSQL migrations on startup)
-cargo run -p hms-server
-
-# 4. Start the web app in another terminal
-cd apps/web
-pnpm install
-pnpm dev
-
-# 5. Optional: seed the load-test hotel (destructive to hotel 4443 only)
-psql "$DATABASE_URL" -f ../../seed/loadtest.sql
-
-# 6. Windows desktop app (install the Tauri CLI; from the Tauri crate directory)
-cd apps/web
-VITE_API_BASE=http://localhost:8080/api/v1 pnpm build   # desktop is served from tauri.localhost, so it needs an absolute API base
-cd ../desktop/src-tauri
-cargo tauri dev
-cargo tauri build               # emits the MSI bundle; auto-update is not configured
-```
-
-First login: hotel ID `0`, username `admin`, and the bootstrap password from `.env`; a forced password change is required. The `seed/loadtest.sql` script creates the separate load-test hotel 4443; it is not a general-purpose 1,000-hotel seed generator.
-
-Hotel-provisioned initial passwords may be short (the admin panel creates `manager` / `1234` so a hotel can be handed over immediately). Every account is forced to change its password on first login, and login attempts are rate-limited; still choose strong passwords for production accounts. The platform admin can create hotels and users from the **Admin Panel** at `/admin`.
-
-The server and web workflow is verified. Desktop MSI packaging is implemented; release signing and auto-update feed/manifest are not configured. Production deployment still requires CORS/TLS/security-header hardening and operational controls listed in sections 17 and `final_product_remains.md`.
-
----
-
-## 15. Configuration
-
-Set in `.env` (never commit real values):
+## 8. Configuration (`.env`, never committed)
 
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string |
-| `SESSION_SECRET` | signs sessions/tokens; production requires at least 32 bytes (`openssl rand -hex 32`) |
-| `GUEST_FIELD_ENCRYPTION_KEY` | encrypts guest identity fields at rest; base64-encoded 32 bytes (`openssl rand -hex 32`) |
-| `APP_ENV` | Set `production` to disable development localhost CORS defaults |
-| `CORS_ALLOWED_ORIGINS` | Comma-separated exact HTTP(S) origins; production should list the HTTPS web origin(s), no wildcard or paths |
-| `ADMIN_BOOTSTRAP_PASSWORD` | initial password for `admin` on hotel 0 (forced change on first login) |
-| `OFFLINE_LOGIN_DAYS` | how long cached desktop credentials stay valid (default 14) |
+| `SESSION_SECRET` | at least 32 bytes in production |
+| `GUEST_FIELD_ENCRYPTION_KEY` | base64 32 bytes, encrypts guest identity fields |
+| `ADMIN_BOOTSTRAP_PASSWORD` | initial hotel-0 `admin` password (forced change on first login) |
+| `APP_ENV` | `development` or `production` |
+| `CORS_ALLOWED_ORIGINS` | exact HTTPS origins in production |
+| `OFFLINE_LOGIN_DAYS` | offline credential lifetime (default 14) |
 | `RATE_LIMIT_LOGIN` | login attempts per window |
-| `SYNC_PROTOCOL_MIN_VERSION` | oldest desktop sync protocol still accepted |
-| `SITE1_*`, `SITE2_*` | reference-site credentials, only for the feature inventory (hotel ID, user, password) |
-| `TEST_USERS` | Comma-separated test users (dev/test only): `hotel_id:username:password:role,...` (e.g., `4442:sina:123:manager`) |
-| `VITE_API_BASE` | Web build-time API base. Leave unset for the browser build (relative `/api/v1`); set `http://<server>:8080/api/v1` when building the web bundle that ships inside the desktop app |
-| `HMS_API_BASE`, `SYNC_INTERVAL_SECS` | Desktop runtime: server base URL used by the background sync worker (default `http://localhost:8080`) and seconds between sync cycles (default 30) |
+| `SYNC_PROTOCOL_MIN_VERSION` | oldest accepted desktop protocol |
+| `TEST_USERS` | dev/test only: `hotel_id:username:password:role,...` |
+| `VITE_API_BASE` | absolute API base for the web bundle shipped inside the desktop app |
+| `HMS_API_BASE`, `SYNC_INTERVAL_SECS` | desktop runtime: server URL and sync interval |
+| `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` | updater signing key, CI secret only |
 
 ---
 
-## 16. Testing
+## 9. Getting started
 
-| Test | What it proves |
+Prerequisites: Rust (stable), Node.js 22 + pnpm, Docker or PostgreSQL 16+, and
+for the desktop build the Tauri 2 Windows prerequisites (WebView2, MSVC build
+tools, Strawberry Perl and NASM for SQLCipher).
+
+```bash
+cp .env.example .env                 # fill DATABASE_URL, SESSION_SECRET, ADMIN_BOOTSTRAP_PASSWORD
+docker compose up -d db
+cargo run -p hms-server              # migrations run on start, listens on :8080
+cd apps/web && pnpm install && pnpm dev
+```
+
+First login: hotel `0`, user `admin`, password from `ADMIN_BOOTSTRAP_PASSWORD`
+(then forced change). Create hotels and their users in `/admin`.
+
+Desktop:
+
+```bash
+cd apps/web
+VITE_API_BASE=http://localhost:8080/api/v1 pnpm build
+cd ../desktop/src-tauri
+cargo tauri dev
+cargo tauri build                    # MSI + updater artifacts
+```
+
+Checks that must stay green: `cargo test --workspace`, `cargo clippy --workspace`,
+`pnpm lint`, `pnpm build`.
+
+---
+
+## 10. Auto-update (desktop)
+
+- `tauri-plugin-updater` checks `https://<update-host>/updates/latest.json` on
+  start and every few hours, and when the server answers `426`.
+- Updates are **signed (minisign)**; the public key is in `tauri.conf.json`, the
+  private key only in CI secrets. A tampered or unsigned package must be rejected.
+- Update flow: download in background, never interrupt an open booking form,
+  install at next restart (or on user click), keep the local database and outbox
+  intact, run SQLite migrations on first start of the new version.
+- Never apply an update while the outbox has unsynced operations without
+  first attempting a sync.
+
+---
+
+## 11. Performance targets
+
+| Target | Value |
 |---|---|
-| Permission matrix | every role x every action behaves as in section 6 |
-| Tenant isolation | hotel A can never read or write hotel B |
-| Double-booking race | concurrent bookings for one room never both succeed |
-| Report integrity | report totals equal the sum of raw payments |
-| Offline for N days, then sync | local work survives and merges correctly |
-| Two offline clients, same room | the later booking becomes a `conflict` for reassignment, nothing lost |
-| Server outage mid-sync | sync resumes cleanly |
-| Interrupted and repeated sync | no duplicate records |
-| Clock-skewed client | bad timestamps cannot win conflicts |
-| Load test (k6) | latency targets in section 1 |
+| Room board, availability, reservation save (p95) | < 200 ms |
+| Full-year report for one hotel | < 500 ms |
+| Scale | 1,000 hotels x 50 rooms x 2 years of reservations |
+
+Reports read `daily_revenue`, never raw reservations. Use keyset pagination.
 
 ---
 
-## 17. Deployment and operations
+## 12. Testing requirements
 
-- **Server:** container image behind a TLS-terminating reverse proxy. PostgreSQL with automated backups and replication. The desktop copy is not a backup.
-- **Migrations:** run on server start (PostgreSQL) and on app start (SQLite). Sync protocol versions are checked on every sync call.
-- **Desktop distribution:** `.msi` installer plus Tauri auto-updater.
-- **Monitoring:** request latency (p95/p99), error rate, sync lag per hotel, database connections and slow queries.
-
----
-
-## 18. Roadmap
-
-1. Server, database schema, RBAC, web app (reservations, rooms, payments, housekeeping).
-2. Reports and daily revenue aggregation.
-3. Feature parity pass against site 2.
-4. Offline Windows app and sync engine.
-5. Load test and tuning to meet the targets.
-6. Mobile app for the hotel system (planned after the web and Windows apps), reusing the API and sync protocol.
-7. Optional: local-network hub for several reception PCs in one hotel.
+Permission matrix, tenant isolation, double-booking race, report integrity,
+offline for N days then sync, **two offline clients booking the same room (later
+becomes `conflict`, nothing lost)**, server outage mid-sync, repeated/interrupted
+sync, clock-skewed client, SQLCipher plaintext-open failure, updater rejects
+tampered package, load test against targets.
 
 ---
 
-## 19. Known limitations
+## 13. Known limitations (shown to hotels)
 
-- An offline desktop app cannot know about bookings from Booking.com or Expedia that arrived meanwhile, so overbooking is possible until sync.
-- Card payments cannot be processed offline.
-- A deactivated user can still log in offline until the next sync or until the offline credentials expire.
-- Offline PCs in the same hotel do not see each other's changes until the internet returns (unless the optional hub is built).
-- The desktop copy covers one hotel and is not a backup of the server.
+- Offline desktops cannot see bookings made meanwhile; overbooking is possible
+  until sync, then resolved as in section 2.3.
+- Card payments cannot be processed offline, only recorded.
+- A deactivated user can log in offline until next sync or cache expiry.
+- Several PCs in one hotel do not see each other offline (optional LAN hub is future work).
+- The desktop copy covers one hotel and is **not a backup**.
+- Reports bucket dates in UTC unless the hotel time-zone fix (TODOS) is done.
+
+---
+
+## 14. Working agreement for agents
+
+1. Take the first unchecked item in `TODOS.md` unless told otherwise.
+2. Make small, tested changes; keep all checks green.
+3. Update `TODOS.md` (check the box, add notes) and docs in the same change.
+4. Prefer Rust. Ask a human only for product decisions or secrets.
+5. Never commit secrets, installers, build output or reference-site captures.

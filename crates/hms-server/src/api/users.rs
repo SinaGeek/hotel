@@ -1,4 +1,4 @@
-//! Users CRUD (README Ã‚Â§6: manager can create accounts below manager level)
+//! Users CRUD (README §6: manager can create accounts below manager level)
 use super::{ApiError, AResult};
 use crate::auth::AuthUser;
 use crate::db;

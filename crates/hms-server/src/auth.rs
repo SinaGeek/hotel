@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-pub const SESSION_DAYS: i64 = 2; // short-lived sessions (README Â§8)
+pub const SESSION_DAYS: i64 = 2; // short-lived sessions (README §8)
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -121,7 +121,7 @@ struct LoginBody {
     hotel_id: i64,
     username: String,
     password: String,
-    /// Set by the desktop webview (README Â§11.7): the response then carries
+    /// Set by the desktop webview (README §11.7): the response then carries
     /// `offline_verifier` so the native shell can cache credentials for
     /// offline verification. Plain browsers never receive the hash.
     #[serde(default)]
@@ -156,7 +156,7 @@ async fn login(
     headers: HeaderMap,
     Json(body): Json<LoginBody>,
 ) -> Result<Json<ApiResponse<LoginResponse>>, (StatusCode, Json<ApiResponse<()>>)> {
-    // Rate limiting per hotel:username (and IP) â€” README Â§8
+    // Rate limiting per hotel:username (and IP) — README §8
     let ip = headers.get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("local")
