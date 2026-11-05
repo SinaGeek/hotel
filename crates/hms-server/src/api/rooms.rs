@@ -20,7 +20,7 @@ pub fn rooms() -> Router<AppState> {
         .route("/{id}/cleanliness", patch(cleanliness))
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, Deserialize, sqlx::FromRow)]
 pub struct RoomTypeDto {
     pub id: Uuid,
     pub name: String,
@@ -30,6 +30,11 @@ pub struct RoomTypeDto {
 }
 
 async fn list_types(State(state): State<AppState>, auth: AuthUser) -> AResult<Json<ApiResponse<Vec<RoomTypeDto>>>> {
+    if let Some(cached) = state.cache.get(auth.hotel_id, crate::cache::CacheDomain::RoomTypes, "all") {
+        if let Ok(data) = serde_json::from_value::<Vec<RoomTypeDto>>(cached) {
+            return Ok(Json(ApiResponse { success: true, data, error: None }));
+        }
+    }
     let rows: Vec<RoomTypeDto> = sqlx::query_as(
         "SELECT id, name, capacity, base_price_cents, amenities FROM room_types WHERE hotel_id = $1 AND deleted_at IS NULL ORDER BY name",
     )
@@ -37,6 +42,9 @@ async fn list_types(State(state): State<AppState>, auth: AuthUser) -> AResult<Js
     .fetch_all(&state.db)
     .await
     .map_err(ApiError::from)?;
+    if let Ok(val) = serde_json::to_value(&rows) {
+        state.cache.set(auth.hotel_id, crate::cache::CacheDomain::RoomTypes, "all", val, std::time::Duration::from_secs(60));
+    }
     Ok(Json(ApiResponse { success: true, data: rows, error: None }))
 }
 
@@ -78,6 +86,8 @@ async fn create_type(
         .fetch_one(&state.db)
         .await
         .map_err(ApiError::from)?;
+    state.cache.invalidate(auth.hotel_id, crate::cache::CacheDomain::RoomTypes);
+    state.cache.invalidate(auth.hotel_id, crate::cache::CacheDomain::Board);
     Ok(Json(ApiResponse { success: true, data: row, error: None }))
 }
 
@@ -133,10 +143,12 @@ async fn patch_type(
         .fetch_one(&state.db)
         .await
         .map_err(ApiError::from)?;
+    state.cache.invalidate(auth.hotel_id, crate::cache::CacheDomain::RoomTypes);
+    state.cache.invalidate(auth.hotel_id, crate::cache::CacheDomain::Board);
     Ok(Json(ApiResponse { success: true, data: row, error: None }))
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, Deserialize, sqlx::FromRow)]
 pub struct RoomDto {
     pub id: Uuid,
     pub room_type_id: Uuid,
@@ -146,6 +158,11 @@ pub struct RoomDto {
 }
 
 async fn list_rooms(State(state): State<AppState>, auth: AuthUser) -> AResult<Json<ApiResponse<Vec<RoomDto>>>> {
+    if let Some(cached) = state.cache.get(auth.hotel_id, crate::cache::CacheDomain::Rooms, "all") {
+        if let Ok(data) = serde_json::from_value::<Vec<RoomDto>>(cached) {
+            return Ok(Json(ApiResponse { success: true, data, error: None }));
+        }
+    }
     let rows: Vec<RoomDto> = sqlx::query_as(
         "SELECT id, room_type_id, room_number, floor, cleanliness FROM rooms WHERE hotel_id = $1 AND deleted_at IS NULL ORDER BY room_number",
     )
@@ -153,6 +170,9 @@ async fn list_rooms(State(state): State<AppState>, auth: AuthUser) -> AResult<Js
     .fetch_all(&state.db)
     .await
     .map_err(ApiError::from)?;
+    if let Ok(val) = serde_json::to_value(&rows) {
+        state.cache.set(auth.hotel_id, crate::cache::CacheDomain::Rooms, "all", val, std::time::Duration::from_secs(60));
+    }
     Ok(Json(ApiResponse { success: true, data: rows, error: None }))
 }
 
@@ -192,6 +212,8 @@ async fn create_room(
         .fetch_one(&state.db)
         .await
         .map_err(ApiError::from)?;
+    state.cache.invalidate(auth.hotel_id, crate::cache::CacheDomain::Rooms);
+    state.cache.invalidate(auth.hotel_id, crate::cache::CacheDomain::Board);
     Ok(Json(ApiResponse { success: true, data: row, error: None }))
 }
 
@@ -236,5 +258,7 @@ async fn cleanliness(
         .fetch_one(&state.db)
         .await
         .map_err(ApiError::from)?;
+    state.cache.invalidate(auth.hotel_id, crate::cache::CacheDomain::Rooms);
+    state.cache.invalidate(auth.hotel_id, crate::cache::CacheDomain::Board);
     Ok(Json(ApiResponse { success: true, data: row, error: None }))
 }

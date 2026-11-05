@@ -558,6 +558,7 @@ pub async fn create(
     .fetch_one(&state.db)
     .await
     .map_err(ApiError::from)?;
+    state.cache.invalidate(auth.hotel_id, crate::cache::CacheDomain::Board);
     Ok(Json(ApiResponse { success: true, data: row, error: None }))
 }
 
@@ -671,6 +672,7 @@ pub async fn edit(
     .fetch_one(&state.db)
     .await
     .map_err(ApiError::from)?;
+    state.cache.invalidate(auth.hotel_id, crate::cache::CacheDomain::Board);
     Ok(Json(ApiResponse { success: true, data: row, error: None }))
 }
 
@@ -778,6 +780,7 @@ pub async fn status_change(
         "SELECT id, hotel_id, room_id, channel_id, guest_id, checkin_date, checkout_date, status, daily_rates, total_price_cents, currency, adults, children, notes, voucher_number, created_at FROM reservations WHERE id = $1",
     )
     .bind(id).fetch_one(&state.db).await.map_err(ApiError::from)?;
+    state.cache.invalidate(auth.hotel_id, crate::cache::CacheDomain::Board);
     Ok(Json(ApiResponse { success: true, data: row, error: None }))
 }
 
@@ -813,7 +816,7 @@ pub struct BoardQuery {
     pub to: chrono::NaiveDate,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct BoardResponse {
     pub from: chrono::NaiveDate,
     pub to: chrono::NaiveDate,
@@ -821,7 +824,7 @@ pub struct BoardResponse {
     pub occupancy: Vec<BoardDay>,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, Deserialize, sqlx::FromRow)]
 pub struct BoardRoom {
     pub id: Uuid,
     pub room_number: String,
@@ -833,7 +836,7 @@ pub struct BoardRoom {
     pub seasonal_price_cents: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct BoardStay {
     pub reservation_id: Uuid,
     pub checkin_date: chrono::NaiveDate,
@@ -844,7 +847,7 @@ pub struct BoardStay {
     pub currency: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct BoardDay {
     pub date: chrono::NaiveDate,
     pub available: i64,
@@ -860,6 +863,20 @@ async fn board(
 ) -> AResult<Json<ApiResponse<BoardResponse>>> {
     if q.to < q.from {
         return Err(ApiError(StatusCode::BAD_REQUEST, "invalid range".into()));
+    }
+    let see_financials = crate::auth::has_permission(
+        &state.db,
+        &auth.role,
+        auth.hotel_id,
+        hms_core::roles::Permission::FinancialView,
+    )
+    .await?;
+
+    let cache_key = format!("{}:{}:{}", q.from, q.to, see_financials);
+    if let Some(cached) = state.cache.get(auth.hotel_id, crate::cache::CacheDomain::Board, &cache_key) {
+        if let Ok(res) = serde_json::from_value::<BoardResponse>(cached) {
+            return Ok(Json(ApiResponse { success: true, data: res, error: None }));
+        }
     }
     let mut conn = state.db.acquire().await.map_err(ApiError::from)?;
     db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
@@ -982,9 +999,14 @@ async fn board(
         occupancy.push(BoardDay { date, available: total_rooms - occ, occupied: occ, from_price_cents: cheapest });
     }
 
+    let response_data = BoardResponse { from: q.from, to: q.to, rooms, occupancy };
+    if let Ok(val) = serde_json::to_value(&response_data) {
+        state.cache.set(auth.hotel_id, crate::cache::CacheDomain::Board, &cache_key, val, std::time::Duration::from_secs(30));
+    }
+
     Ok(Json(ApiResponse {
         success: true,
-        data: BoardResponse { from: q.from, to: q.to, rooms, occupancy },
+        data: response_data,
         error: None,
     }))
 }

@@ -3,6 +3,7 @@ pub mod guest_identity;
 pub mod key_rotation;
 pub mod models;
 pub mod roles;
+pub mod site2;
 pub mod sync;
 pub mod validation;
 

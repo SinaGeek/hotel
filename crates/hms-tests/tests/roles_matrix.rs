@@ -30,6 +30,12 @@ fn all() -> Vec<Permission> {
         ReportViewTenant,
         ReportViewPlatform,
         AuditLogView,
+        GuestExport,
+        GuestDelete,
+        InvoiceManage,
+        StockManage,
+        ExpenseManage,
+        AgencyManage,
     ]
 }
 
@@ -45,7 +51,8 @@ fn expected(role: Role) -> Vec<Permission> {
             ReservationCheckOut, ReservationCancel,
             FinancialView, PaymentRecord, PaymentRefund, FolioManage,
             HousekeepingView, HousekeepingUpdateStatus,
-            ReportViewTenant, AuditLogView,
+            ReportViewTenant, AuditLogView, GuestExport, GuestDelete,
+            InvoiceManage, StockManage, ExpenseManage, AgencyManage,
         ],
         // Reception: report_view_tenant intentionally DEFAULT OFF (§6)
         Role::Reception => vec![
@@ -54,6 +61,7 @@ fn expected(role: Role) -> Vec<Permission> {
             ReservationCheckOut, ReservationCancel,
             FinancialView, PaymentRecord, PaymentRefund, FolioManage,
             HousekeepingView, HousekeepingUpdateStatus,
+            InvoiceManage,
         ],
         Role::Housekeeping => vec![HousekeepingView, HousekeepingUpdateStatus],
     }

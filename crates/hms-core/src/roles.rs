@@ -4,15 +4,36 @@ use serde::{Deserialize, Serialize};
 pub const PERMISSIONS: &[Permission] = {
     use Permission::*;
     &[
-        HotelCreate, HotelEdit, HotelDisable, HotelViewAll,
-        UserManage, UserView,
-        RoomTypeManage, RoomManage, PriceRuleManage,
-        ReservationView, ReservationCreate, ReservationEdit,
-        ReservationCheckIn, ReservationCheckOut, ReservationCancel,
-        FinancialView, PaymentRecord, PaymentRefund, FolioManage,
-        HousekeepingView, HousekeepingUpdateStatus,
-        ReportViewTenant, ReportViewPlatform, AuditLogView,
-        GuestExport, GuestDelete,
+        HotelCreate,
+        HotelEdit,
+        HotelDisable,
+        HotelViewAll,
+        UserManage,
+        UserView,
+        RoomTypeManage,
+        RoomManage,
+        PriceRuleManage,
+        ReservationView,
+        ReservationCreate,
+        ReservationEdit,
+        ReservationCheckIn,
+        ReservationCheckOut,
+        ReservationCancel,
+        FinancialView,
+        PaymentRecord,
+        PaymentRefund,
+        FolioManage,
+        HousekeepingView,
+        HousekeepingUpdateStatus,
+        ReportViewTenant,
+        ReportViewPlatform,
+        AuditLogView,
+        GuestExport,
+        GuestDelete,
+        InvoiceManage,
+        StockManage,
+        ExpenseManage,
+        AgencyManage,
     ]
 };
 
@@ -92,6 +113,11 @@ pub enum Permission {
     // Guest data (GDPR)
     GuestExport,
     GuestDelete,
+    // Site-2 modules (G6): e-invoice, stock, expenses, agencies, FX
+    InvoiceManage,
+    StockManage,
+    ExpenseManage,
+    AgencyManage,
 }
 
 impl Permission {
@@ -124,6 +150,10 @@ impl Permission {
             Permission::AuditLogView => "audit_log_view",
             Permission::GuestExport => "guest_export",
             Permission::GuestDelete => "guest_delete",
+            Permission::InvoiceManage => "invoice_manage",
+            Permission::StockManage => "stock_manage",
+            Permission::ExpenseManage => "expense_manage",
+            Permission::AgencyManage => "agency_manage",
         }
     }
 
@@ -155,13 +185,17 @@ impl Permission {
             "audit_log_view" => Permission::AuditLogView,
             "guest_export" => Permission::GuestExport,
             "guest_delete" => Permission::GuestDelete,
+            "invoice_manage" => Permission::InvoiceManage,
+            "stock_manage" => Permission::StockManage,
+            "expense_manage" => Permission::ExpenseManage,
+            "agency_manage" => Permission::AgencyManage,
             _ => return None,
         })
     }
 }
 
 impl Role {
-        pub fn is_platform_admin(&self) -> bool {
+    pub fn is_platform_admin(&self) -> bool {
         matches!(self, Role::Admin)
     }
 
@@ -195,6 +229,10 @@ impl Role {
                     | Permission::AuditLogView
                     | Permission::GuestExport
                     | Permission::GuestDelete
+                    | Permission::InvoiceManage
+                    | Permission::StockManage
+                    | Permission::ExpenseManage
+                    | Permission::AgencyManage
             ),
             Role::Reception => matches!(
                 perm,
@@ -211,8 +249,9 @@ impl Role {
                     | Permission::FolioManage
                     | Permission::HousekeepingView
                     | Permission::HousekeepingUpdateStatus
-                // ReportViewTenant intentionally NOT default (README §6):
-                // defaults off, configurable per hotel via hotel_permission_overrides
+                    // G6: reception issues e-invoices for the folio they closed
+                    | Permission::InvoiceManage // ReportViewTenant intentionally NOT default (README §6):
+                                                // defaults off, configurable per hotel via hotel_permission_overrides
             ),
             Role::Housekeeping => matches!(
                 perm,

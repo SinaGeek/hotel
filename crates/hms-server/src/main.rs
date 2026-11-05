@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod bootstrap;
+mod cache;
 mod db;
 mod metrics;
 mod openapi;
@@ -23,6 +24,7 @@ pub struct AppState {
     pub db: PgPool,
     pub session_secret: String,
     pub rate_limiter: Arc<tokio::sync::Mutex<rate_limiter::RateLimiter>>,
+    pub cache: cache::CacheStore,
 }
 
 #[tokio::main]
@@ -81,6 +83,7 @@ async fn main() {
             std::env::var("RATE_LIMIT_LOGIN").ok().and_then(|v| v.parse().ok()).unwrap_or(10),
             60_000,
         ))),
+        cache: cache::CacheStore::new(),
     };
 
     let cors_origins = cors_allowed_origins();

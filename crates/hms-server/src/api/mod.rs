@@ -1,5 +1,8 @@
+pub mod agencies;
 pub mod audit;
 pub mod channels;
+pub mod currency;
+pub mod e_invoices;
 pub mod guests;
 pub mod hotels;
 pub mod payments;
@@ -8,6 +11,7 @@ pub mod reports;
 pub mod reservations;
 pub mod roles;
 pub mod rooms;
+pub mod stock;
 pub mod sync;
 pub mod users;
 
@@ -60,4 +64,10 @@ pub fn router() -> axum::Router<crate::AppState> {
         .nest("/board", reservations::board_router())
         .nest("/reports", reports::router())
         .nest("/sync", sync::router())
+        // G6: site-2 deferred modules
+        .nest("/agencies", agencies::router())
+        .nest("/currency-rates", currency::router())
+        .nest("/stock", stock::router())
+        .nest("/expenses", stock::expenses_router())
+        .nest("/e-invoices", e_invoices::router())
 }

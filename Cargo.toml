@@ -4,6 +4,7 @@ members = [
     "crates/hms-server",
     "crates/hms-tests",
     "crates/hms-sync",
+    "crates/hms-lan-hub",
     "apps/desktop/src-tauri"
 ]
 resolver = "2"
