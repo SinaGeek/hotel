@@ -536,6 +536,12 @@ html[data-theme='dark'] .modal-back { background: rgba(0, 0, 10, 0.6); }
 .nav-burger { display: none; }
 .nav-back { display: none; }
 
+.search-input {
+  min-width: 160px;
+  max-width: 260px;
+  flex: 1 1 auto;
+}
+
 @media (max-width: 768px) {
   .nav-burger { display: grid; }
   .sidebar {
@@ -555,6 +561,8 @@ html[data-theme='dark'] .modal-back { background: rgba(0, 0, 10, 0.6); }
   .sync-text { display: none; } /* dot still shows the sync state */
   .page { padding: 14px 12px; }
   .fab { right: 14px; bottom: 14px; }
+  .seg { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .row { gap: 8px; }
 }
 
 @media (max-width: 640px) {
@@ -566,6 +574,27 @@ html[data-theme='dark'] .modal-back { background: rgba(0, 0, 10, 0.6); }
   .rc-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
   table.hms th, table.hms td { padding: 9px 10px; font-size: 13px; }
   .modal { width: min(480px, 96vw); padding: 16px; }
+
+  /* F9 visual polish for narrow viewports (375px & 700px) */
+  .row input, .row select {
+    flex: 1 1 140px;
+    min-width: 110px;
+    max-width: 100%;
+  }
+  .row button {
+    flex: 0 0 auto;
+  }
+  .card.row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .card.row input {
+    width: 100% !important;
+  }
+  .card.row button {
+    width: 100%;
+  }
 }
 
 /* Floor group header removed: the reference Housekeeping page is a flat

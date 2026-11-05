@@ -53,7 +53,7 @@ export function Channels() {
           placeholder={t('ch.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ width: 220 }}
+          className="search-input"
         />
         <select value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">{t('ch.all')}</option>

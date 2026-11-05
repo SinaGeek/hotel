@@ -4,6 +4,7 @@ mod bootstrap;
 mod db;
 mod metrics;
 mod openapi;
+mod pdf;
 mod rate_limiter;
 
 use axum::response::IntoResponse;

@@ -17,6 +17,7 @@ pub fn router() -> Router<AppState> {
         .route("/count", get(count))
         .route("/{id}", get(by_id).patch(edit))
         .route("/{id}/suggested-rooms", get(suggested_rooms))
+        .route("/{id}/voucher.pdf", get(voucher_pdf_endpoint))
         .route("/{id}/check-in", post(check_in))
         .route("/{id}/check-out", post(check_out))
         .route("/{id}/cancel", post(cancel))
@@ -374,6 +375,89 @@ async fn by_id(
     .await
     .map_err(|_| ApiError(StatusCode::NOT_FOUND, "reservation not found".into()))?;
     Ok(Json(ApiResponse { success: true, data: row, error: None }))
+}
+
+/// F5: printable reservation voucher. Same visibility rule as the JSON view;
+/// the PDF builder is `crate::pdf::voucher_pdf` (embedded DejaVuSans so
+/// Turkish guest/hotel names survive).
+async fn voucher_pdf_endpoint(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+) -> AResult<axum::response::Response> {
+    if !crate::auth::has_permission(&state.db, &auth.role, auth.hotel_id, hms_core::roles::Permission::ReservationView).await? {
+        return Err(ApiError(StatusCode::FORBIDDEN, "reservation_view required".into()));
+    }
+    let mut conn = state.db.acquire().await.map_err(ApiError::from)?;
+    db::set_tenant_scope(&mut conn, auth.hotel_id).await?;
+
+    #[derive(sqlx::FromRow)]
+    struct VoucherRow {
+        checkin_date: chrono::NaiveDate,
+        checkout_date: chrono::NaiveDate,
+        status: String,
+        total_price_cents: i64,
+        currency: String,
+        adults: i16,
+        children: i16,
+        notes: Option<String>,
+        voucher_number: Option<String>,
+        created_at: chrono::DateTime<chrono::Utc>,
+        room_number: String,
+        room_type_name: String,
+        channel_name: String,
+        guest_full_name: Option<String>,
+        hotel_name: String,
+    }
+    let row: VoucherRow = sqlx::query_as(
+        r#"SELECT r.checkin_date, r.checkout_date, r.status, r.total_price_cents, r.currency,
+                  r.adults, r.children, r.notes, r.voucher_number, r.created_at,
+                  ro.room_number, rt.name AS room_type_name, c.name AS channel_name,
+                  g.full_name AS guest_full_name, h.name AS hotel_name
+           FROM reservations r
+           JOIN rooms ro      ON ro.id = r.room_id
+           JOIN room_types rt ON rt.id = ro.room_type_id
+           JOIN channels c    ON c.id = r.channel_id
+           LEFT JOIN guests g ON g.id = r.guest_id
+           JOIN hotels h      ON h.id = r.hotel_id
+           WHERE r.id = $1 AND r.hotel_id = $2 AND r.deleted_at IS NULL"#,
+    )
+    .bind(id)
+    .bind(auth.hotel_id)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(|_| ApiError(StatusCode::NOT_FOUND, "reservation not found".into()))?;
+
+    let nights = (row.checkout_date - row.checkin_date).num_days();
+    let mut fields: Vec<(&str, String)> = vec![
+        ("Voucher No", row.voucher_number.clone().unwrap_or_else(|| id.to_string())),
+        ("Guest", row
+            .guest_full_name
+            .clone()
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| "(not recorded)".into())),
+        ("Room", format!("{} {}", row.room_number, row.room_type_name)),
+        ("Channel", row.channel_name.clone()),
+        ("Check-in", row.checkin_date.format("%F").to_string()),
+        ("Check-out", row.checkout_date.format("%F").to_string()),
+        ("Nights", nights.to_string()),
+        ("Occupants", format!("{} adults, {} children", row.adults, row.children)),
+        ("Status", row.status.clone()),
+        ("Total", format!("{} {}", crate::pdf::fmt_cents(row.total_price_cents), row.currency)),
+    ];
+    if let Some(notes) = row.notes.as_deref().filter(|n| !n.trim().is_empty()) {
+        fields.push(("Notes", notes.to_string()));
+    }
+    let footer = format!(
+        "Booked {} — reservation {} — HMS",
+        row.created_at.to_rfc3339(),
+        id
+    );
+    let bytes = crate::pdf::voucher_pdf(&row.hotel_name, &fields, &footer);
+    Ok(crate::pdf::pdf_response(
+        bytes,
+        &format!("voucher-{}.pdf", &id.to_string()[..8]),
+    ))
 }
 
 #[derive(Deserialize, Serialize)]

@@ -42,7 +42,6 @@ function assertKeyParity() {
     console.error('[i18n] English/Turkish key drift', { missingInTurkish: missingInB, missingInEnglish: missingInA })
   }
 }
-assertKeyParity()
 
 export function currentLang(): Lang {
   const stored = localStorage.getItem(LANG_KEY)
@@ -434,5 +433,6 @@ i18n.use(initReactI18next).init({
   interpolation: { escapeValue: false },
 })
 document.documentElement.lang = currentLang()
+assertKeyParity()
 
 export default i18n

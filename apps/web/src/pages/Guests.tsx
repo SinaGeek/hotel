@@ -115,7 +115,7 @@ export function Guests() {
           placeholder={t('gu.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ width: 220 }}
+          className="search-input"
         />
         <select value={country} onChange={(e) => setCountry(e.target.value)}>
           <option value="">{t('gu.country')}</option>

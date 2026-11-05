@@ -30,3 +30,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 rand = "0.8"
+# F5: server-side PDF (vouchers, revenue reports); DejaVuSans.ttf bundled in
+# assets/fonts. Pinned: the 0.12 API is still in flux between minors.
+printpdf = { version = "=0.12.8", default-features = false }

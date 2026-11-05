@@ -15,6 +15,7 @@ pub fn router() -> Router<AppState> {
         .route("/summary", get(summary))
         .route("/by-channel", get(by_channel))
         .route("/by-day", get(by_day))
+        .route("/by-day.pdf", get(by_day_pdf))
         .route("/by-room", get(by_room))
         .route("/forecast", get(forecast))
         .route("/inhouse", get(inhouse))
@@ -219,6 +220,92 @@ async fn by_day(
     .await
     .map_err(ApiError::from)?;
     Ok(Json(ApiResponse { success: true, data: rows, error: None }))
+}
+
+/// F5: the by-day report as a server-rendered PDF (browser-print replacement).
+/// Same permission, range and query as the JSON `by_day`; the pagination to
+/// A4 pages (40 day rows per page, totals in page 1's footer) happens in
+/// `crate::pdf::by_day_report_pdf`.
+async fn by_day_pdf(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Query(q): Query<ReportQuery>,
+) -> AResult<axum::response::Response> {
+    require_report_view(&state, &auth).await?;
+    let (from, to) = validate_range(&q)?;
+
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        date: chrono::NaiveDate,
+        room_revenue_cents: i64,
+        extra_revenue_cents: i64,
+        payments_collected_cents: i64,
+        occupied_nights: i64,
+    }
+    let rows: Vec<Row> = sqlx::query_as(
+        r#"
+        SELECT date,
+               COALESCE(sum(room_revenue_cents),0)::bigint      AS room_revenue_cents,
+               COALESCE(sum(extra_revenue_cents),0)::bigint     AS extra_revenue_cents,
+               COALESCE(sum(payment_collected_cents),0)::bigint AS payments_collected_cents,
+               count(*) FILTER (WHERE occupied)::bigint         AS occupied_nights
+        FROM daily_revenue
+        WHERE hotel_id = $1 AND date >= $2 AND date < $3
+        GROUP BY date
+        ORDER BY date
+        "#,
+    )
+    .bind(auth.hotel_id)
+    .bind(from)
+    .bind(to)
+    .fetch_all(&state.db)
+    .await
+    .map_err(ApiError::from)?;
+
+    #[derive(sqlx::FromRow)]
+    struct HotelMeta {
+        name: String,
+        default_currency: String,
+    }
+    let meta: HotelMeta = sqlx::query_as(
+        "SELECT name, default_currency FROM hotels WHERE id = $1",
+    )
+    .bind(auth.hotel_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(ApiError::from)?;
+
+    let cell_rows: Vec<[String; 5]> = rows
+        .iter()
+        .map(|r| {
+            [
+                r.date.format("%F").to_string(),
+                crate::pdf::fmt_cents(r.room_revenue_cents),
+                crate::pdf::fmt_cents(r.extra_revenue_cents),
+                crate::pdf::fmt_cents(r.payments_collected_cents),
+                r.occupied_nights.to_string(),
+            ]
+        })
+        .collect();
+    let totals: [i64; 4] = [
+        rows.iter().map(|r| r.room_revenue_cents).sum(),
+        rows.iter().map(|r| r.extra_revenue_cents).sum(),
+        rows.iter().map(|r| r.payments_collected_cents).sum(),
+        rows.iter().map(|r| r.occupied_nights).sum(),
+    ];
+    let bytes = crate::pdf::by_day_report_pdf(
+        &meta.name,
+        &meta.default_currency,
+        &from.format("%F").to_string(),
+        &to.format("%F").to_string(),
+        &cell_rows,
+        totals,
+        &chrono::Utc::now().to_rfc3339(),
+    );
+    Ok(crate::pdf::pdf_response(
+        bytes,
+        &format!("hms-daily-revenue-{from}-{to}.pdf"),
+    ))
 }
 
 #[derive(Serialize, sqlx::FromRow)]
