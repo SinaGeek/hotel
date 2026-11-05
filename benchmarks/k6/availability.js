@@ -1,15 +1,15 @@
-// README §13 load scenario 2 — availability search: 7-day windows at sliding
+// README Â§13 load scenario 2 â€” availability search: 7-day windows at sliding
 // offsets across the year (same endpoint as the board, smaller windows).
 //
 //   k6 run -e BASE_URL=http://localhost:8080 -e HOTEL=4443 \
 //          -e USERNAME=loadmgr -e PASSWORD=... availability.js
 //
-// Threshold (README §13): p95 < 200 ms
+// Threshold (README Â§13): p95 < 200 ms
 import http from 'k6/http';
 import { check } from 'k6';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
-const HOTEL = __ENV.HOTEL || '4443';
+const HOTEL = parseInt(__ENV.HOTEL || '4443', 10);
 const USERNAME = __ENV.USERNAME || 'loadmgr';
 const PASSWORD = __ENV.PASSWORD;
 const N = parseInt(__ENV.N || '200', 10);
@@ -24,7 +24,6 @@ export const options = {
     },
   },
   thresholds: { http_req_duration: ['p(95)<200'] },
-  noCookies: true,
 };
 
 export function setup() {

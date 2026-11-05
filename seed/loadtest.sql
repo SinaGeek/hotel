@@ -59,9 +59,11 @@ VALUES (gen_random_uuid(), 4443, 'loadmgr', 'Load Test Manager', 'manager', 'x',
 ON CONFLICT (hotel_id, username) DO NOTHING;
 
 -- dev-only: let loadmgr log in by copying the local dev manager's password
--- hash (references the hash column — no secret in this file)
+-- hash (references the hash column — no secret in this file). The hotel-4442
+-- `manager` login is guaranteed by the A-block dev seeding; do not reference
+-- ad-hoc test users here (they may not exist → NULL hash → unusable login).
 UPDATE users SET password_hash = (
-  SELECT password_hash FROM users WHERE hotel_id = 4442 AND username = 'mtest'
+  SELECT password_hash FROM users WHERE hotel_id = 4442 AND username = 'manager'
 ) WHERE hotel_id = 4443 AND username = 'loadmgr';
 
 -- ---------------------------------------------------------------------------

@@ -44,3 +44,6 @@ apps/desktop/src-tauri/gen/
 
 # generated OpenAPI bundle (F2): regenerate with pnpm gen:api
 /apps/web/src/types/generated/openapi.json
+
+# local dev-stack state (pids/logs/secret/update host staging)
+.stack/

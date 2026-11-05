@@ -1,15 +1,15 @@
-// README §13 load scenario 1 — room board (21-day window over a 60-room hotel).
+// README Â§13 load scenario 1 â€” room board (21-day window over a 60-room hotel).
 // Parity harness for `cargo run -p hms-tests -r --example loadtest`.
 //
 //   k6 run -e BASE_URL=http://localhost:8080 -e HOTEL=4443 \
 //          -e USERNAME=loadmgr -e PASSWORD=... board.js
 //
-// Threshold (README §13): p95 < 200 ms
+// Threshold (README Â§13): p95 < 200 ms
 import http from 'k6/http';
 import { check } from 'k6';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
-const HOTEL = __ENV.HOTEL || '4443';
+const HOTEL = parseInt(__ENV.HOTEL || '4443', 10);
 const USERNAME = __ENV.USERNAME || 'loadmgr';
 const PASSWORD = __ENV.PASSWORD;            // required; never hardcode
 const N = parseInt(__ENV.N || '200', 10);   // total requests across VUs
@@ -27,7 +27,6 @@ export const options = {
     http_req_duration: ['p(95)<200'],
     // the login inside setup is not part of the target measurement
   },
-  noCookies: true,
 };
 
 export function setup() {

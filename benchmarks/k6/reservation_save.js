@@ -1,20 +1,20 @@
-// README §13 load scenario 3 — reservation save: unique room + far-future
+// README Â§13 load scenario 3 â€” reservation save: unique room + far-future
 // one-night stays (never collides with the seeded stays).
 //
 //   k6 run -e BASE_URL=http://localhost:8080 -e HOTEL=4443 \
 //          -e USERNAME=loadmgr -e PASSWORD=... reservation_save.js
 //
-// Threshold (README §13): p95 < 200 ms
+// Threshold (README Â§13): p95 < 200 ms
 import http from 'k6/http';
 import { check } from 'k6';
 import exec from 'k6/execution';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
-const HOTEL = __ENV.HOTEL || '4443';
+const HOTEL = parseInt(__ENV.HOTEL || '4443', 10);
 const USERNAME = __ENV.USERNAME || 'loadmgr';
 const PASSWORD = __ENV.PASSWORD;
 const N = parseInt(__ENV.N || '200', 10);
-// window start: run index (epoch minutes mod 700 * 10 days) — same semantics
+// window start: run index (epoch minutes mod 700 * 10 days) â€” same semantics
 // as the Rust runner; races between consecutive runs are mitigated by this.
 const baseDay = 400 + (Math.floor(Date.now() / 60000) % 700) * 10;
 
@@ -28,7 +28,6 @@ export const options = {
     },
   },
   thresholds: { http_req_duration: ['p(95)<200'] },
-  noCookies: true,
 };
 
 export function setup() {
