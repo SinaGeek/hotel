@@ -4,7 +4,7 @@
 #   1. PostgreSQL 18 (started via pg_ctl if not already listening on 5432)
 #   2. hms-server   (cargo run; applies SQL migrations automatically at boot)
 #   3. optional: Caddy TLS proxy + static SPA + update host (-WithCaddy,
-#      config: deploy/Caddyfile.native; needs apps/web/dist and hosts entries)
+#      config: server/deploy/Caddyfile.native; needs client/web/dist and hosts entries)
 #
 # Usage (PowerShell):
 #   .\scripts\dev-stack.ps1                 # start everything, wait for /health
@@ -24,6 +24,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+$ServerDir = Join-Path $RepoRoot "server"   # the server workspace root
 $PgBin    = "C:\Program Files\PostgreSQL\18\bin"
 $PgData   = "C:\Program Files\PostgreSQL\18\data"
 $StackDir = Join-Path $RepoRoot ".stack"
@@ -121,10 +122,11 @@ if (Test-PortListening $ServerPort) {
     $env:SESSION_SECRET = $SessionSecret
     $env:APP_ENV        = "development"
     $env:RUST_LOG       = "info"
+    $env:CORS_ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:4173,http://tauri.localhost,https://tauri.localhost"
     # cargo run stays alive as the server's wrapper process; logs go to .stack/.
     $proc = Start-Process -FilePath "cargo" `
         -ArgumentList @("run", "-q", "-p", "hms-server") `
-        -WorkingDirectory $RepoRoot `
+        -WorkingDirectory $ServerDir `
         -RedirectStandardOutput $ServerOutLog -RedirectStandardError $ServerErrLog `
         -PassThru -WindowStyle Hidden
     "server: cargo pid $($proc.Id), logs: $ServerErrLog"
@@ -146,7 +148,7 @@ if ($WithCaddy) {
     } else {
         "caddy: starting with deploy\Caddyfile.native"
         $proc = Start-Process -FilePath $caddyExe `
-            -ArgumentList @("run", "--config", (Join-Path $RepoRoot "deploy\Caddyfile.native")) `
+            -ArgumentList @("run", "--config", (Join-Path $ServerDir "deploy\Caddyfile.native")) `
             -WorkingDirectory $RepoRoot `
             -RedirectStandardOutput $CaddyLog -RedirectStandardError $CaddyErrLog `
             -PassThru -WindowStyle Hidden

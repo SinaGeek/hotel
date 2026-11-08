@@ -9,7 +9,7 @@
 #                        host (e.g. `aws s3 cp`, `rclone copy`, `gh release upload`).
 #                        When unset the workflow only produces the artifacts.
 #
-# The server's `426` force-update path (see crates/hms-core/src/sync.rs
+# The server's `426` force-update path (see server/crates/hms-core/src/sync.rs
 # SYNC_PROTOCOL_MIN_VERSION) makes a released manifest mandatory for older
 # builds, so always publish `latest.json` together with the MSI.
 name: Release desktop
@@ -37,11 +37,11 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: apps/web/pnpm-lock.yaml
+          cache-dependency-path: client/web/pnpm-lock.yaml
 
       # Webview assets are embedded into the desktop binary
       - name: Build web bundle
-        working-directory: apps/web
+        working-directory: client/web
         run: |
           pnpm install --frozen-lockfile
           pnpm build
@@ -49,7 +49,7 @@ jobs:
       # SQLCipher builds OpenSSL from source; the runner already has MSVC,
       # Perl and NASM, so only the key material needs to be provided.
       - name: Build + sign MSI
-        working-directory: apps/web
+        working-directory: client/web
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -58,14 +58,14 @@ jobs:
       - name: Collect artifacts
         shell: pwsh
         run: |
-          $bundle = "apps/desktop/src-tauri/target/release/bundle"
+          $bundle = "client/target/release/bundle"
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
           # MSI installer + its minisign signature
           Copy-Item "$bundle/msi/*.msi" artifacts/ -ErrorAction Stop
           Copy-Item "$bundle/msi/*.msi.sig" artifacts/ -ErrorAction Stop
           $msi = Get-ChildItem artifacts -Filter *.msi | Select-Object -First 1
           $sig = Get-Content "$($msi.FullName).sig" -Raw
-          $version = (Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $version = (Get-Content client/desktop/tauri.conf.json -Raw | ConvertFrom-Json).version
           $base = if ($env:UPDATE_BASE_URL) { $env:UPDATE_BASE_URL } else { "https://updates.hms.example/api/v1/desktop" }
           $manifest = [ordered]@{
             version  = $version

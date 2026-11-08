@@ -1,0 +1,52 @@
+# Caddy reference config: TLS termination + static SPA + API proxy.
+# Caddy obtains and renews Let's Encrypt certificates automatically.
+#
+#   hms.example.com {
+#       root * /srv/hms/web
+#       encode gzip zstd
+#       @api path /api/* /health /metrics
+#       handle @api {
+#           reverse_proxy hms-server:8080
+#       }
+#       handle {
+#           try_files {path} /index.html
+#           file_server
+#       }
+#   }
+#
+# Notes
+# - `/metrics` is deliberately on the same host above; restrict it at the
+#   firewall or add a separate internal-only site block if the scraper is remote.
+# - `root` points at the built web bundle (copied from client/web/dist), not the sources.
+# - The desktop auto-updater (docs/updater.md) needs `latest.json` and the MSI
+#   served as plain static files; the `updates.` site block below does that and
+#   must match `plugins.updater.endpoints` in tauri.conf.json.
+
+hms.example.com {
+	root * /srv/hms/web
+	encode gzip zstd
+
+	@api path /api/* /health /metrics
+	handle @api {
+		reverse_proxy hms-server:8080
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# Desktop update host: `latest.json` + the signed MSI, nothing else.
+updates.hms.example {
+	root * /srv/hms/updates
+	# never cache the manifest: a stale one hides a new release
+	@manifest path /desktop/latest.json
+	header @manifest Cache-Control "no-store"
+	file_server
+
+	# large installers and old manifests stay off the logs
+	log {
+		output discard
+	}
+}

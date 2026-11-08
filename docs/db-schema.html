@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HMS Desktop — SQLite Database Design</title>
+<style>
+  html,body { margin:0; background:#f8fafc; font-family:'Segoe UI',system-ui,sans-serif; }
+  #canvas { position:relative; width:1600px; height:1320px; background:#f8fafc; }
+  .tbl { position:absolute; border:1px solid #94a3b8; border-radius:8px; background:#fff;
+         box-shadow:0 2px 6px rgba(15,23,42,.08); overflow:hidden; }
+  .th { height:26px; line-height:26px; padding:0 10px; font-weight:700; font-size:12px; color:#fff; }
+  .fr { height:18px; line-height:18px; padding:0 10px; font-size:10.5px; color:#334155;
+        display:flex; justify-content:space-between; border-top:1px solid #f1f5f9; }
+  .fr b { font-weight:700; } .fr em { font-style:normal; font-weight:700; font-size:9px; margin-left:4px; }
+  .ft { color:#94a3b8; font-size:9.5px; }
+  .cap { position:absolute; font-size:10px; color:#64748b; }
+  .band { position:absolute; font-size:10px; font-weight:700; letter-spacing:.12em; color:#475569; text-transform:uppercase; }
+  .th.hA{background:#4f46e5}.th.hB{background:#0284c7}.th.hC{background:#b45309}
+  .th.hD{background:#15803d}.th.hE{background:#7c3aed}.th.hF{background:#be123c}.th.hG{background:#475569}
+  svg#lines { position:absolute; left:0; top:0; width:1600px; height:1320px; }
+</style>
+</head>
+<body>
+<div id="canvas">
+<svg id="lines">
+  <defs>
+    <marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <g stroke="#64748b" stroke-width="1.2" fill="none" marker-end="url(#ar)">
+    <!-- room_types 1:N rooms -->
+    <path d="M470,274 L470,330"/>
+    <!-- room_types 1:N price_rules (left gutter) -->
+    <path d="M340,207 L322,207 L322,763 L340,763"/>
+    <!-- rooms 1:N reservations.room_id -->
+    <path d="M610,383 L630,383 L630,253 L650,253"/>
+    <!-- channels 1:N reservations.channel_id -->
+    <path d="M610,600 L640,600 L640,271 L650,271"/>
+    <!-- reservations.guest_id N:1 guests -->
+    <path d="M940,289 L975,289 L975,230 L990,230"/>
+    <!-- links.reservation_id N:1 reservations -->
+    <path d="M990,410 L940,410"/>
+    <!-- links.guest_id N:1 guests -->
+    <path d="M1150,370 L1150,310"/>
+    <!-- reservation_groups 1:N reservations.reservation_group_id -->
+    <path d="M300,673 L615,673 L615,441 L650,441"/>
+    <!-- folio_transactions.reservation_id N:1 reservations -->
+    <path d="M650,875 L605,875 L605,477 L650,477"/>
+    <!-- payments.reservation_id N:1 reservations -->
+    <path d="M760,570 L760,514"/>
+    <!-- hotels 1:N restaurants -->
+    <path d="M100,366 L100,420"/>
+    <!-- hotels 1:N reservation_groups (hotel_id) -->
+    <path d="M30,250 L16,250 L16,715 L30,715"/>
+    <!-- shift_transfers.from_user/to_user -> local_users.username -->
+    <path d="M1320,300 L1300,300 L1300,594 L1270,594"/>
+  </g>
+  <g font-size="9px" fill="#64748b">
+    <text x="478" y="306">1 : N</text>
+    <text x="632" y="345">room_id</text>
+    <text x="643" y="580">channel_id</text>
+    <text x="946" y="282">guest_id</text>
+    <text x="952" y="404">reservation_id</text>
+    <text x="1120" y="344">guest_id</text>
+    <text x="330" y="666">reservation_group_id</text>
+    <text x="595" y="700" transform="rotate(-90 595,700)">reservation_id</text>
+    <text x="766" y="546">reservation_id</text>
+    <text x="108" y="397">1 : N</text>
+    <text x="1292" y="470" transform="rotate(-90 1292,470)">from_user / to_user</text>
+  </g>
+</svg>
+
+<!-- ================= header ================= -->
+<h1 style="position:absolute;left:30px;top:10px;margin:0;font-size:20px;color:#0f172a">
+  HMS Desktop — Database Design (encrypted SQLCipher, <code style="font-size:12px">%APPDATA%\com.hms.desktop\hms.sqlite</code>)
+</h1>
+<div style="position:absolute;left:30px;top:38px;font-size:11.5px;color:#475569">
+  <b style="color:#0f172a">Legend:</b> <b>PK</b> primary key &middot; <b>UK</b> unique &middot; <b>FK</b> arrow &rarr; referenced table &middot;
+  every operational table carries <b>hotel_id &rarr; hotels.id</b> (hotel scoping) &middot; rows are soft-deleted via deleted_at/deleted_ms &middot;
+  schema versioned by <b>PRAGMA user_version 0&hellip;6</b> (migrations 0001&ndash;0006).
+</div>
+
+<span class="band" style="left:730px;top:96px;color:#b45309">Reservations &amp; Finance</span>
+<span class="band" style="left:30px;top:96px;color:#4f46e5">Hotel Domain</span>
+<span class="band" style="left:340px;top:110px;color:#0284c7">Room inventory / channels &amp; pricing</span>
+<span class="band" style="left:990px;top:96px;color:#7c3aed">People &amp; Access</span>
+<span class="band" style="left:1320px;top:96px;color:#be123c">Workflow</span>
+<span class="band" style="left:30px;top:974px;color:#475569">Sync Engine &amp; Audit (server parity — idle when offline)</span>
+
+<!-- ================= column A: hotel domain ================= -->
+<div class="tbl" style="left:30px;top:140px;width:270px;height:226px">
+  <div class="th hA">hotels</div>
+  <div class="fr"><span><b>id</b><em>PK</em></span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span><b>code</b><em>UK</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>name</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>default_currency</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>time_zone</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>is_active</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>address</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>contact_phone</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>contact_email</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>created_ms</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>updated_ms</span><span class="ft">INTEGER</span></div>
+</div>
+<div class="cap" style="left:34px;top:368px">extended profile JSON &rarr; desktop_kv key <b>hotel_profile:{id}</b></div>
+
+<div class="tbl" style="left:30px;top:420px;width:270px;height:170px">
+  <div class="th hA">restaurants</div>
+  <div class="fr"><span><b>id</b><em>PK</em></span><span class="ft">TEXT (UUID)</span></div>
+  <div class="fr"><span><b>hotel_id</b><em>FK&rarr;hotels</em></span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>name</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>capacity</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>is_active</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>configuration_json</span><span class="ft">JSON</span></div>
+  <div class="fr"><span>created_ms</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>updated_ms</span><span class="ft">INTEGER</span></div>
+</div>
+<div class="cap" style="left:34px;top:594px">per-restaurant specification &amp; cash flow: deferred (0005)</div>
+
+<div class="tbl" style="left:30px;top:640px;width:270px;height:152px">
+  <div class="th hA">reservation_groups</div>
+  <div class="fr"><span><b>id</b><em>PK</em></span><span class="ft">TEXT (UUID)</span></div>
+  <div class="fr"><span><b>hotel_id</b><em>FK&rarr;hotels</em></span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>name</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>notes</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>created_ms / updated_ms</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>deleted_ms</span><span class="ft">INTEGER</span></div>
+</div>
+
+<!-- ================= column B: rooms / channels ================= -->
+<div class="tbl" style="left:340px;top:140px;width:270px;height:134px">
+  <div class="th hB">room_types</div>
+  <div class="fr"><span><b>id</b><em>PK</em></span><span class="ft">TEXT (UUID)</span></div>
+  <div class="fr"><span>name</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>capacity</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>base_price_cents</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>deleted_at</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span><b>hotel_id</b><em>FK&rarr;hotels</em></span><span class="ft">INTEGER</span></div>
+</div>
+
+<div class="tbl" style="left:340px;top:330px;width:270px;height:152px">
+  <div class="th hB">rooms</div>
+  <div class="fr"><span><b>id</b><em>PK</em></span><span class="ft">TEXT (UUID)</span></div>
+  <div class="fr"><span><b>room_type_id</b><em>FK&rarr;room_types</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>room_number</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>floor</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>cleanliness</span><span class="ft">TEXT (5 states)</span></div>
+  <div class="fr"><span>deleted_at</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span><b>hotel_id</b><em>FK&rarr;hotels</em></span><span class="ft">INTEGER</span></div>
+</div>
+
+<div class="tbl" style="left:340px;top:540px;width:270px;height:116px">
+  <div class="th hB">channels</div>
+  <div class="fr"><span><b>id</b><em>PK</em></span><span class="ft">TEXT (UUID)</span></div>
+  <div class="fr"><span>kind</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>name</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>is_active</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span><b>hotel_id</b><em>FK&rarr;hotels</em></span><span class="ft">INTEGER</span></div>
+</div>
+
+<div class="tbl" style="left:340px;top:710px;width:270px;height:134px">
+  <div class="th hB">price_rules</div>
+  <div class="fr"><span><b>id</b><em>PK</em></span><span class="ft">TEXT (UUID)</span></div>
+  <div class="fr"><span><b>room_type_id</b><em>FK&rarr;room_types</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>date_from / date_to</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>price_cents</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>currency</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>hotel_id<em>FK&rarr;hotels</em></span><span class="ft">INTEGER *</span></div>
+</div>
+
+<!-- ================= column C: reservations + finance ================= -->
+<div class="tbl" style="left:650px;top:200px;width:290px;height:314px">
+  <div class="th hC">reservations</div>
+  <div class="fr"><span><b>id</b><em>PK</em></span><span class="ft">TEXT (UUID)</span></div>
+  <div class="fr"><span><b>room_id</b><em>FK&rarr;rooms</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span><b>channel_id</b><em>FK&rarr;channels</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span><b>guest_id</b><em>FK&rarr;guests</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>checkin_date</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>checkout_date</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>status</span><span class="ft">TEXT (5 states)</span></div>
+  <div class="fr"><span>adults / children</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>total_price_cents</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>daily_rates</span><span class="ft">JSON [{date,price}]</span></div>
+  <div class="fr"><span>currency</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span><b>reservation_group_id</b><em>FK&rarr;groups</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>external_ref</span><span class="ft">TEXT (bulk import key)</span></div>
+  <div class="fr"><span>deleted_at</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span><b>hotel_id</b><em>FK&rarr;hotels</em></span><span class="ft">INTEGER</span></div>
+</div>
+
+<div class="tbl" style="left:650px;top:570px;width:290px;height:170px">
+  <div class="th hD">payments <span style="font-weight:400;font-size:10px">(append-only)</span></div>
+  <div class="fr"><span><b>id</b><em>PK</em></span><span class="ft">TEXT (UUID)</span></div>
+  <div class="fr"><span><b>reservation_id</b><em>FK&rarr;reservations</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>amount_cents</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>currency</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>payment_type</span><span class="ft">TEXT (cash/card&hellip;)</span></div>
+  <div class="fr"><span>reference</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>is_reversal</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>created_at</span><span class="ft">INTEGER</span></div>
+</div>
+
+<div class="tbl" style="left:650px;top:790px;width:290px;height:170px">
+  <div class="th hD">folio_transactions <span style="font-weight:400;font-size:10px">(other transactions)</span></div>
+  <div class="fr"><span><b>id</b><em>PK</em></span><span class="ft">TEXT (UUID)</span></div>
+  <div class="fr"><span><b>reservation_id</b><em>FK&rarr;reservations</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>category</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>description</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>unit_price_cents</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>quantity</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>total_cents</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>currency</span><span class="ft">TEXT</span></div>
+</div>
+
+<!-- ================= column D: people ================= -->
+<div class="tbl" style="left:990px;top:140px;width:280px;height:170px">
+  <div class="th hE">guests</div>
+  <div class="fr"><span><b>id</b><em>PK</em></span><span class="ft">TEXT (UUID)</span></div>
+  <div class="fr"><span>full_name</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>nationality</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>license_plate</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>birth_date</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>external_ref</span><span class="ft">TEXT (import key)</span></div>
+  <div class="fr"><span>deleted_at</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span><b>hotel_id</b><em>FK&rarr;hotels</em></span><span class="ft">INTEGER</span></div>
+</div>
+
+<div class="tbl" style="left:990px;top:370px;width:280px;height:80px">
+  <div class="th hE">guest_reservation_links</div>
+  <div class="fr"><span><b>reservation_id</b><em>PK FK&rarr;reservations</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span><b>guest_id</b><em>PK FK&rarr;guests</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>link_type</span><span class="ft">TEXT &middot; M:N link table</span></div>
+</div>
+
+<div class="tbl" style="left:990px;top:520px;width:280px;height:152px">
+  <div class="th hE">local_users <span style="font-weight:400;font-size:10px">(offline auth)</span></div>
+  <div class="fr"><span><b>user_id</b><em>PK</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span><b>username</b><em>UK</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>full_name</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>role</span><span class="ft">TEXT "reception,accountant"</span></div>
+  <div class="fr"><span><b>hotel_id</b><em>FK&rarr;hotels</em></span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>password_phc</span><span class="ft">hex(DPAPI(argon2))</span></div>
+  <div class="fr"><span>created_ms</span><span class="ft">INTEGER</span></div>
+</div>
+
+<!-- ================= column E: workflow + kv ================= -->
+<div class="tbl" style="left:1320px;top:140px;width:250px;height:224px">
+  <div class="th hF">shift_transfers</div>
+  <div class="fr"><span><b>id</b><em>PK</em></span><span class="ft">TEXT (UUID)</span></div>
+  <div class="fr"><span><b>hotel_id</b><em>FK&rarr;hotels</em></span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span><b>from_user</b><em>FK&rarr;local_users</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span><b>to_user</b><em>FK&rarr;local_users</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>amount_cents</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>currency</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>notes</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>status</span><span class="ft">pending|approved|rejected</span></div>
+  <div class="fr"><span>created_ms</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>decided_ms</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>decided_by</span><span class="ft">TEXT</span></div>
+</div>
+
+<div class="tbl" style="left:1320px;top:420px;width:250px;height:80px">
+  <div class="th hF">desktop_kv</div>
+  <div class="fr"><span><b>key</b><em>PK</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>value</span><span class="ft">JSON</span></div>
+  <div class="fr"><span>updated_ms</span><span class="ft">INTEGER</span></div>
+</div>
+<div class="cap" style="left:1326px;top:502px">key = hotel_profile:{hotel_id}</div>
+
+<div class="tbl" style="left:1320px;top:560px;width:250px;height:62px">
+  <div class="th hG">kv <span style="font-weight:400;font-size:10px">(sync cache)</span></div>
+  <div class="fr"><span><b>key</b><em>PK</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>value</span><span class="ft">TEXT</span></div>
+</div>
+
+<!-- ================= engine strip ================= -->
+<div class="tbl" style="left:30px;top:1000px;width:300px;height:224px">
+  <div class="th hG">outbox <span style="font-weight:400;font-size:10px">(pending changes to sync)</span></div>
+  <div class="fr"><span><b>operation_id</b><em>PK</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span><b>hotel_id</b><em>FK&rarr;hotels</em></span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>entity_type / entity_id</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>operation_type</span><span class="ft">insert|update|delete</span></div>
+  <div class="fr"><span>payload</span><span class="ft">JSON</span></div>
+  <div class="fr"><span>client_timestamp</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>enqueued_at_ms</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>attempts</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>last_error</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>next_retry_at_ms</span><span class="ft">INTEGER</span></div>
+</div>
+
+<div class="tbl" style="left:360px;top:1000px;width:270px;height:80px">
+  <div class="th hG">applied_ops</div>
+  <div class="fr"><span><b>operation_id</b><em>PK</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>change_seq</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>applied_at</span><span class="ft">INTEGER</span></div>
+</div>
+
+<div class="tbl" style="left:660px;top:1000px;width:280px;height:134px">
+  <div class="th hG">failures <span style="font-weight:400;font-size:10px">(rejected ops)</span></div>
+  <div class="fr"><span><b>operation_id</b><em>PK</em></span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>entity_type / entity_id</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>attempts</span><span class="ft">INTEGER</span></div>
+  <div class="fr"><span>last_error</span><span class="ft">TEXT</span></div>
+  <div class="fr"><span>occurred_at</span><span class="ft">INTEGER</span></div>
+</div>
+
+<div style="position:absolute;left:990px;top:1000px;width:575px;font-size:11px;color:#334155;border:1px dashed #94a3b8;border-radius:8px;padding:10px 12px">
+  <b style="color:#0f172a">Storage notes</b><br>
+  &bull; File encrypted at rest (SQLCipher); all writes go through <code>client/desktop/src/local_store.rs</code>.<br>
+  &bull; Migrations run sequentially in <code>init_connection</code> guarded by <code>PRAGMA user_version</code>:
+  0001 init &middot; 0002 daily rates &middot; 0003 local users &middot; 0004 workflows (desktop_kv, shift_transfers)
+  &middot; 0005 hotels/restaurants/groups/links &middot; 0006 hotel_id scoping on core tables.<br>
+  &bull; Multi-role users: <code>local_users.role</code> holds a comma-separated role list.<br>
+  &bull; Hotel code/ID change moves all scoped rows in one transaction (<code>save_local_hotel</code>).<br>
+  &bull; <span style="color:#b45309">price_rules.hotel_id (*)</span> and room pricing columns are applied via migration 0007.
+</div>
+</div>
+</body>
+</html>

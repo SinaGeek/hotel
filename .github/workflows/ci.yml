@@ -1,8 +1,13 @@
-# CI for the HMS workspace (README §16): cargo test + clippy + web build.
+# CI for the HMS workspaces (README §16): cargo test + clippy (server) and
+# cargo test + clippy (client) + web build.
 #
 # The db-guarantee integration tests are gated on TEST_DATABASE_URL; CI runs
 # them against a postgres service container. Without it they skip gracefully
 # (`[skip] TEST_DATABASE_URL not set`), so plain cargo test stays green.
+#
+# Layout after the restructure (see docs/restructure.md):
+#   server/ — server workspace (hms-core, hms-server, hms-lan-hub, hms-tests)
+#   client/ — client workspace (hms-core-lite, hms-sync, desktop, web, mobile)
 name: CI
 
 on:
@@ -35,16 +40,24 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: cargo test (workspace)
+      - name: cargo test (server workspace)
+        working-directory: server
         run: cargo test --workspace
-      - name: clippy (warnings allowed, errors fail)
+      - name: clippy (server workspace, warnings allowed, errors fail)
+        working-directory: server
+        run: cargo clippy --workspace
+      - name: cargo test (client workspace)
+        working-directory: client
+        run: cargo test --workspace
+      - name: clippy (client workspace)
+        working-directory: client
         run: cargo clippy --workspace
 
   web:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: apps/web
+        working-directory: client/web
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -54,7 +67,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: apps/web/pnpm-lock.yaml
+          cache-dependency-path: client/web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm build

@@ -1,0 +1,51 @@
+# PostgreSQL + the HMS server (README §17). Usage (run from server/):
+#   cp .env.example .env      # fill in SESSION_SECRET, ADMIN_BOOTSTRAP_PASSWORD, ...
+#   docker compose up -d --build
+#
+# The server applies PostgreSQL migrations on start. Put a TLS-terminating
+# reverse proxy in front of it (see deploy/Caddyfile or deploy/nginx.conf).
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: hms-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-hms}
+    ports:
+      - "5432:5432"
+    volumes:
+      - hms-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-hms}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hms-server
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-hms}
+      APP_ENV: ${APP_ENV:-production}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:?ADMIN_BOOTSTRAP_PASSWORD must be set}
+      GUEST_FIELD_ENCRYPTION_KEY: ${GUEST_FIELD_ENCRYPTION_KEY:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      RATE_LIMIT_LOGIN: ${RATE_LIMIT_LOGIN:-10}
+      OFFLINE_LOGIN_DAYS: ${OFFLINE_LOGIN_DAYS:-14}
+      SYNC_PROTOCOL_MIN_VERSION: ${SYNC_PROTOCOL_MIN_VERSION:-1}
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      DB_POOL_MIN: ${DB_POOL_MIN:-10}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  hms-db-data:

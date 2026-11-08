@@ -1,0 +1,47 @@
+[package]
+name = "hms-desktop"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "hms_desktop"
+path = "src/lib.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+# `custom-protocol` embeds the web UI into the binary (production assets).
+# Tauri's build script decides dev-vs-production from this feature ONLY:
+# without it, a plain `cargo build --release` compiles the app in dev mode and
+# the window tries to load `build.devUrl` ("localhost refused to connect").
+# It is a default feature so every cargo invocation produces a standalone exe.
+# `cargo tauri build` enables it too, so bundling is unaffected.
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[dependencies]
+hms-core = { path = "../crates/hms-core" }
+hms-sync = { path = "../crates/hms-sync" }
+tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.40", features = ["full"] }
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
+uuid = { version = "1.10", features = ["v7", "v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+argon2 = "0.5"
+# OsRng for argon2 salt generation (password-hash's rand_core feature is off)
+rand_core = { version = "0.6", features = ["std"] }
+tracing = "0.1"
+# Settings ▸ bulk import (README §11): CSV register/collections + the
+# Reservation.xlsx workbook. Both are pure-Rust readers.
+csv = "1"
+calamine = "0.24.0"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["dpapi", "wincrypt", "wincred", "winbase"] }

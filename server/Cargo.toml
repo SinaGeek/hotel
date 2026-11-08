@@ -1,0 +1,18 @@
+# HMS server workspace (self-contained; see docs/restructure.md).
+# Everything the server needs lives under server/: crates, migrations, deploy,
+# seed, benchmarks and the container files. It has no dependency on client/.
+[workspace]
+members = [
+    "crates/hms-core",
+    "crates/hms-server",
+    "crates/hms-tests",
+    "crates/hms-lan-hub",
+]
+resolver = "2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

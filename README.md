@@ -186,21 +186,35 @@ licensing. Details in `docs/feature-inventory.md`.
 
 ## 7. Repository layout
 
+Independently buildable workspaces (restructure decision — the server and the
+standalone desktop client share no local crate dependencies; see
+`docs/restructure.md`):
+
 ```
-crates/hms-core        shared models, roles, sync types, validation, guest encryption
-crates/hms-server      Axum API, sync endpoints, migrations runner, operator bins
-crates/hms-sync        client sync engine
-crates/hms-tests       integration tests + load-test runner
-apps/web               React + Vite SPA (also embedded in desktop)
-apps/desktop/src-tauri Tauri 2 shell, SQLite/SQLCipher mirror, DPAPI, updater
-migrations/            PostgreSQL migrations
-desktop-migrations/    SQLite migrations
-seed/                  dev and load-test seed data
-benchmarks/            load-test reports and k6 scripts
-deploy/                Caddy / nginx samples
-scripts/               backup scripts
-docs/                  API snapshot, feature inventory, runbooks, desktop verification
+server/                          self-contained server workspace (own Cargo.lock/target)
+  crates/hms-core                models, roles, sync protocol types, validation, guest encryption
+  crates/hms-server              Axum API, sync endpoints, migrations runner, operator bins
+  crates/hms-lan-hub             LAN sync hub service
+  crates/hms-tests               integration tests + load-test runner
+  migrations/                    PostgreSQL migrations
+  seed/, benchmarks/, deploy/    dev seeds, load tests, and Caddy / nginx samples
+  Dockerfile, docker-compose.yml container deployment
+  .env.example                   server configuration template
+
+client/                          self-contained client workspace (own Cargo.lock/target)
+  crates/hms-core                vendored slim core: only roles + sync protocol types
+  crates/hms-sync                client sync engine (outbox/pull, offline login)
+  desktop/                       Tauri 2 crate (shell, SQLite/SQLCipher mirror, DPAPI, updater)
+  desktop/desktop-migrations     SQLite mirror migrations
+  web/                           React + Vite SPA (also embedded in the desktop shell)
+  mobile/                        React Native app
+
+scripts/                         cross-cutting dev scripts (dev-stack, desktop build)
+docs/                            API snapshot, feature inventory, runbooks
 ```
+
+The client's `hms-core` is wire-compatible by contract: `sync.rs` types and
+`SYNC_PROTOCOL_VERSION` must stay identical to `server/crates/hms-core/src/sync.rs`.
 
 ---
 
@@ -231,10 +245,11 @@ for the desktop build the Tauri 2 Windows prerequisites (WebView2, MSVC build
 tools, Strawberry Perl and NASM for SQLCipher).
 
 ```bash
+cd server
 cp .env.example .env                 # fill DATABASE_URL, SESSION_SECRET, ADMIN_BOOTSTRAP_PASSWORD
-docker compose up -d db
+docker compose up -d db              # or: scripts/dev-stack.ps1 (native Windows stack)
 cargo run -p hms-server              # migrations run on start, listens on :8080
-cd apps/web && pnpm install && pnpm dev
+cd ../client/web && pnpm install && pnpm dev
 ```
 
 First login: hotel `0`, user `admin`, password from `ADMIN_BOOTSTRAP_PASSWORD`
@@ -243,15 +258,15 @@ First login: hotel `0`, user `admin`, password from `ADMIN_BOOTSTRAP_PASSWORD`
 Desktop:
 
 ```bash
-cd apps/web
+cd client/web
 VITE_API_BASE=http://localhost:8080/api/v1 pnpm build
-cd ../desktop/src-tauri
+cd ../desktop
 cargo tauri dev
 cargo tauri build                    # MSI + updater artifacts
 ```
 
-Checks that must stay green: `cargo test --workspace`, `cargo clippy --workspace`,
-`pnpm lint`, `pnpm build`.
+Checks that must stay green: `cargo test --workspace` (in `server/` and in
+`client/`), `cargo clippy --workspace` (both), `pnpm lint`, `pnpm build`.
 
 ---
 

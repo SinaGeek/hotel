@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HMS Desktop",
+  "version": "0.1.0",
+  "identifier": "com.hms.desktop",
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://updates.hms.example/api/v1/desktop/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQyNkNCRDJFRTc0QUYwNTEKUldSUjhFcm5McjFzMHRUMldHaU52VG12N3Y0b0VkcGJoY3dKMUdTejBibnV3TVEwMTlvYU5TcmcK"
+    }
+  },
+  "build": {
+    "frontendDist": "../web/dist",
+    "devUrl": "http://localhost:4173",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "HMS — Hotel Management",
+        "width": 1366,
+        "height": 820,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "url": "index.html"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi"],
+    "createUpdaterArtifacts": true,
+    "icon": ["icons/icon.ico"]
+  }
+}
